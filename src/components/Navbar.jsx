@@ -88,13 +88,15 @@ export default function Navbar({ onNavigate, onOpenAdmin, isAdminOpen, profile, 
             <span>Book DJ</span>
           </button>
 
+          {/* Subtle Sign in button */}
           <button
             onClick={() => onOpenAdmin(!isAdminOpen)}
-            className={`admin-toggle-btn ${isAdminOpen ? 'active' : ''}`}
-            title={isAdminOpen ? 'Return to Website' : 'Admin Portal'}
+            className={`nav-signin-btn ${isAdminOpen ? 'active' : ''}`}
+            title={isAdminOpen ? 'Return to Website' : 'Sign in'}
+            aria-label="Sign in"
           >
-            <Shield size={16} />
-            <span className="admin-btn-text">{isAdminOpen ? 'Exit' : 'Admin'}</span>
+            <User size={15} />
+            <span className="signin-text">{isAdminOpen ? 'Exit' : 'Sign In'}</span>
           </button>
 
           {/* Mobile menu toggle */}
@@ -151,10 +153,10 @@ export default function Navbar({ onNavigate, onOpenAdmin, isAdminOpen, profile, 
                   setMobileMenuOpen(false);
                   onOpenAdmin(!isAdminOpen);
                 }}
-                className="btn btn-secondary btn-full"
+                className="btn btn-secondary btn-full btn-signin-drawer"
               >
-                <Shield size={16} />
-                <span>{isAdminOpen ? 'Exit to Site' : 'Admin Management Portal'}</span>
+                <User size={16} />
+                <span>{isAdminOpen ? 'Return to Website' : 'Sign In'}</span>
               </button>
             </div>
           </nav>

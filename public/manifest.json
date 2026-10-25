@@ -1,7 +1,7 @@
 {
-  "name": "DJ Samizen — Afro-Urban Sound",
-  "short_name": "DJ Samizen",
-  "description": "Official website and booking portal for DJ Samizen. Premier Afro-urban sound, Afrobeats, Amapiano, nightlife events and bookings.",
+  "name": "Dj Samizen",
+  "short_name": "Dj Samizen",
+  "description": "Official website and booking portal for Dj Samizen. Afro-urban sound, event tour dates, mixes, and bookings.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#08080b",
@@ -17,23 +17,23 @@
       "purpose": "any maskable"
     },
     {
-      "src": "/icons/icon-512.jpg",
+      "src": "/icons/icon-512.png",
       "sizes": "512x512",
-      "type": "image/jpeg",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ],
   "shortcuts": [
     {
-      "name": "Book DJ Samizen",
+      "name": "Book Dj Samizen",
       "short_name": "Book",
       "description": "Go directly to the booking section",
       "url": "/#booking"
     },
     {
-      "name": "Upcoming Events",
+      "name": "Events & Tour",
       "short_name": "Events",
-      "description": "View upcoming events",
+      "description": "View tour dates & club appearances",
       "url": "/#events"
     }
   ]

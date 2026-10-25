@@ -40,11 +40,17 @@ export default function BookingSection({ profile, prefilledEvent = '' }) {
     setErrorMsg('');
 
     try {
-      await createBooking(formData);
-      setSubmitted(true);
+      const { data, error } = await createBooking(formData);
+      if (error) {
+        setErrorMsg(error.message || 'Unable to submit booking inquiry to database. Please try again.');
+        setSubmitted(false);
+      } else {
+        setSubmitted(true);
+      }
     } catch (err) {
       console.error('Booking submission error:', err);
-      setSubmitted(true);
+      setErrorMsg('An unexpected error occurred while submitting your booking inquiry. Please try again.');
+      setSubmitted(false);
     } finally {
       setLoading(false);
     }

@@ -77,9 +77,34 @@ export async function getAdminSession() {
   }
 }
 
+export async function getUserRole(user) {
+  if (!user || !user.email) return 'anon';
+  const email = user.email.toLowerCase();
+  if (email === 'josephngotho988@gmail.com') {
+    return 'owner';
+  }
+  try {
+    const { data, error } = await supabase
+      .from('team_members')
+      .select('role, is_active')
+      .eq('email', email)
+      .maybeSingle();
+    if (!error && data && data.is_active) {
+      return data.role; // 'owner' or 'dj'
+    }
+  } catch {
+    // team_members table may not be ready yet
+  }
+  // Check user metadata as secondary fallback
+  if (user.user_metadata?.role === 'dj' || user.user_metadata?.role === 'owner') {
+    return user.user_metadata.role;
+  }
+  return 'unauthorized';
+}
+
 export async function signInAdminWithPassword(email, password) {
   try {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     if (error) {
       reportSupabaseError('Admin password sign-in', error);
       return { user: null, session: null, error };
@@ -88,6 +113,22 @@ export async function signInAdminWithPassword(email, password) {
   } catch (err) {
     reportSupabaseError('Admin password sign-in exception', err);
     return { user: null, session: null, error: err };
+  }
+}
+
+export async function requestPasswordReset(email) {
+  try {
+    const { data, error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/#reset-password`
+    });
+    if (error) {
+      reportSupabaseError('Password reset request', error);
+      return { data: null, error };
+    }
+    return { data, error: null };
+  } catch (err) {
+    reportSupabaseError('Password reset exception', err);
+    return { data: null, error: err };
   }
 }
 
@@ -538,12 +579,20 @@ export async function deleteCategory(id) {
   }
 }
 
-// ----------------- MIXES (public.mixes) -----------------
-export async function getMixes() {
-  if (knownMissingTables.has('mixes')) {
-    return getLocal('mixes', INITIAL_MIXES);
-  }
+// ----------------- MIXES (public.mixes) - YOUTUBE EXTERNAL LINKS ONLY -----------------
+export function isValidYouTubeUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|shorts\/)|youtu\.be\/)[\w-]{11}/i;
+  return ytRegex.test(url.trim());
+}
 
+export function extractYouTubeId(url) {
+  if (!url || typeof url !== 'string') return null;
+  const match = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/i);
+  return match ? match[1] : null;
+}
+
+export async function getMixes() {
   try {
     const { data, error } = await supabase
       .from('mixes')
@@ -554,20 +603,30 @@ export async function getMixes() {
       setLocal('mixes', data);
       return data;
     }
-    if (error && error.code === 'PGRST205') {
-      knownMissingTables.add('mixes');
-    }
   } catch (e) {
-    knownMissingTables.add('mixes');
+    // fallback
   }
   return getLocal('mixes', INITIAL_MIXES);
 }
 
 export async function createMix(mixData) {
+  const targetUrl = (mixData.youtube_url || mixData.audio_url || '').trim();
+  const ytId = extractYouTubeId(targetUrl);
+  const artworkUrl = mixData.artwork_url?.trim() || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : null);
+
+  const payload = {
+    title: (mixData.title || '').trim(),
+    genre: mixData.genre || 'Afro-Urban',
+    audio_url: targetUrl,
+    stream_url: targetUrl,
+    artwork_url: artworkUrl,
+    duration: mixData.duration || 'Live Set',
+    tracklist: mixData.tracklist || ''
+  };
+
   try {
-    const { data, error } = await supabase.from('mixes').insert([mixData]).select().single();
+    const { data, error } = await supabase.from('mixes').insert([payload]).select().single();
     if (error) {
-      if (error.code === 'PGRST205') knownMissingTables.add('mixes');
       reportSupabaseError('Create mix', error);
       return { data: null, error };
     }
@@ -576,6 +635,37 @@ export async function createMix(mixData) {
     return { data, error: null };
   } catch (err) {
     reportSupabaseError('Create mix exception', err);
+    return { data: null, error: err };
+  }
+}
+
+export async function updateMix(id, mixData) {
+  const targetUrl = (mixData.youtube_url || mixData.audio_url || '').trim();
+  const ytId = extractYouTubeId(targetUrl);
+  const artworkUrl = mixData.artwork_url?.trim() || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : undefined);
+
+  const payload = {};
+  if (mixData.title !== undefined) payload.title = mixData.title.trim();
+  if (mixData.genre !== undefined) payload.genre = mixData.genre;
+  if (targetUrl) {
+    payload.audio_url = targetUrl;
+    payload.stream_url = targetUrl;
+  }
+  if (artworkUrl !== undefined) payload.artwork_url = artworkUrl;
+  if (mixData.duration !== undefined) payload.duration = mixData.duration;
+  if (mixData.tracklist !== undefined) payload.tracklist = mixData.tracklist;
+
+  try {
+    const { data, error } = await supabase.from('mixes').update(payload).eq('id', id).select().single();
+    if (error) {
+      reportSupabaseError('Update mix', error);
+      return { data: null, error };
+    }
+    const current = getLocal('mixes', INITIAL_MIXES);
+    setLocal('mixes', current.map(m => (m.id === id ? { ...m, ...data } : m)));
+    return { data, error: null };
+  } catch (err) {
+    reportSupabaseError('Update mix exception', err);
     return { data: null, error: err };
   }
 }
@@ -614,37 +704,27 @@ export async function getSocialLinks() {
   return getLocal('social_links', INITIAL_SOCIALS);
 }
 
-export async function saveSocialLink(socialData) {
-  try {
-    const current = getLocal('social_links', INITIAL_SOCIALS);
-    const exists = current.find(s => s.platform === socialData.platform);
+export async function saveSocialLink(platform, url) {
+  const cleanUrl = url && url.trim() ? url.trim() : null;
+  const isActive = Boolean(cleanUrl);
 
-    if (exists?.id) {
-      const { data, error } = await supabase
-        .from('social_links')
-        .update({ url: socialData.url, is_active: true })
-        .eq('id', exists.id)
-        .select()
-        .single();
-      if (error) {
-        reportSupabaseError('Update social link', error);
-        return { data: null, error };
-      }
-      return { data, error: null };
-    } else {
-      const { data, error } = await supabase
-        .from('social_links')
-        .insert([{ platform: socialData.platform, url: socialData.url, is_active: true }])
-        .select()
-        .single();
-      if (error) {
-        reportSupabaseError('Insert social link', error);
-        return { data: null, error };
-      }
-      return { data, error: null };
+  try {
+    const { data, error } = await supabase
+      .from('social_links')
+      .update({ url: cleanUrl, is_active: isActive, updated_at: new Date().toISOString() })
+      .eq('platform', platform.toLowerCase())
+      .select()
+      .single();
+
+    if (error) {
+      reportSupabaseError(`Update social link ${platform}`, error);
+      return { data: null, error };
     }
+    const current = getLocal('social_links', INITIAL_SOCIALS);
+    setLocal('social_links', current.map(s => (s.platform === platform ? { ...s, url: cleanUrl, is_active: isActive } : s)));
+    return { data, error: null };
   } catch (err) {
-    reportSupabaseError('Save social link exception', err);
+    reportSupabaseError(`Save social link exception ${platform}`, err);
     return { data: null, error: err };
   }
 }
@@ -667,10 +747,6 @@ export async function deleteSocialLink(id) {
 
 // ----------------- BOOKINGS (public.bookings) -----------------
 export async function getBookings() {
-  if (knownMissingTables.has('bookings')) {
-    return getLocal('bookings', INITIAL_BOOKINGS);
-  }
-
   try {
     const { data, error } = await supabase
       .from('bookings')
@@ -681,20 +757,38 @@ export async function getBookings() {
       setLocal('bookings', data);
       return data;
     }
-    if (error && error.code === 'PGRST205') {
-      knownMissingTables.add('bookings');
+    if (error) {
+      reportSupabaseError('Get bookings', error);
     }
   } catch (e) {
-    knownMissingTables.add('bookings');
+    // fallback
   }
   return getLocal('bookings', INITIAL_BOOKINGS);
 }
 
 export async function createBooking(bookingData) {
+  // Construct schema-compliant payload to prevent PGRST204 errors
+  const payload = {
+    client_name: (bookingData.client_name || '').trim(),
+    client_phone: (bookingData.client_phone || '').trim(),
+    client_email: bookingData.client_email ? bookingData.client_email.trim() : null,
+    event_type: bookingData.event_type || 'Club Night / Residency',
+    event_date: bookingData.event_date,
+    event_location: (bookingData.event_location || '').trim(),
+    status: 'new'
+  };
+
+  // Compile guest count, budget range, and extra notes into music_preferences
+  const metaParts = [];
+  if (bookingData.music_preferences) metaParts.push(bookingData.music_preferences.trim());
+  if (bookingData.guest_count) metaParts.push(`Estimated Guests: ${bookingData.guest_count}`);
+  if (bookingData.budget_range) metaParts.push(`Budget: ${bookingData.budget_range}`);
+  if (bookingData.additional_notes) metaParts.push(`Notes: ${bookingData.additional_notes.trim()}`);
+  payload.music_preferences = metaParts.length > 0 ? metaParts.join(' | ') : null;
+
   try {
-    const { data, error } = await supabase.from('bookings').insert([bookingData]).select().single();
+    const { data, error } = await supabase.from('bookings').insert([payload]).select().single();
     if (error) {
-      if (error.code === 'PGRST205') knownMissingTables.add('bookings');
       reportSupabaseError('Create booking', error);
       return { data: null, error };
     }
@@ -710,12 +804,14 @@ export async function createBooking(bookingData) {
 export async function updateBookingStatus(id, status, adminNotes = '') {
   try {
     const patch = { status };
-    if (adminNotes) patch.admin_notes = adminNotes;
+    if (adminNotes !== undefined) patch.admin_notes = adminNotes;
     const { data, error } = await supabase.from('bookings').update(patch).eq('id', id).select().single();
     if (error) {
       reportSupabaseError('Update booking status', error);
       return { data: null, error };
     }
+    const current = getLocal('bookings', INITIAL_BOOKINGS);
+    setLocal('bookings', current.map(b => (b.id === id ? { ...b, ...data } : b)));
     return { data, error: null };
   } catch (err) {
     reportSupabaseError('Update booking status exception', err);
@@ -738,3 +834,71 @@ export async function deleteBooking(id) {
     return { success: false, error: err };
   }
 }
+
+// ----------------- TEAM MEMBERS (public.team_members) -----------------
+export async function getTeamMembers() {
+  try {
+    const { data, error } = await supabase
+      .from('team_members')
+      .select('*')
+      .order('created_at', { ascending: true });
+    if (error) return [];
+    return data || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function addTeamMember(email, role = 'dj', displayName = '') {
+  try {
+    const payload = {
+      email: email.trim().toLowerCase(),
+      role: role.toLowerCase(),
+      display_name: displayName.trim() || email.split('@')[0],
+      is_active: true
+    };
+    const { data, error } = await supabase.from('team_members').insert([payload]).select().single();
+    if (error) {
+      reportSupabaseError('Add team member', error);
+      return { data: null, error };
+    }
+    return { data, error: null };
+  } catch (err) {
+    reportSupabaseError('Add team member exception', err);
+    return { data: null, error: err };
+  }
+}
+
+export async function updateTeamMemberStatus(id, isActive) {
+  try {
+    const { data, error } = await supabase
+      .from('team_members')
+      .update({ is_active: isActive })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) {
+      reportSupabaseError('Update team member status', error);
+      return { data: null, error };
+    }
+    return { data, error: null };
+  } catch (err) {
+    reportSupabaseError('Update team member status exception', err);
+    return { data: null, error: err };
+  }
+}
+
+export async function deleteTeamMember(id) {
+  try {
+    const { error } = await supabase.from('team_members').delete().eq('id', id);
+    if (error) {
+      reportSupabaseError('Delete team member', error);
+      return { success: false, error };
+    }
+    return { success: true, error: null };
+  } catch (err) {
+    reportSupabaseError('Delete team member exception', err);
+    return { success: false, error: err };
+  }
+}
+

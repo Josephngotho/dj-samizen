@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import Navbar from './components/Navbar';
 import Hero from './components/Hero';
-import AudioPlayer from './components/AudioPlayer';
 import EventsSection from './components/EventsSection';
+import MixesSection from './components/MixesSection';
 import GenresSection from './components/GenresSection';
 import AboutPressKit from './components/AboutPressKit';
 import BookingSection from './components/BookingSection';
@@ -131,8 +131,8 @@ export default function App() {
             onBookClick={handleBookEvent}
           />
 
-          {/* Sound Vault & Audio Player */}
-          <AudioPlayer mixes={mixes} />
+          {/* Sound Vault & Curated Mixes (YouTube external) */}
+          <MixesSection mixes={mixes} />
 
           {/* Music Palette & Genres */}
           <GenresSection categories={categories} />

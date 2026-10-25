@@ -64,7 +64,7 @@ export default function Hero({ profile, onScrollTo }) {
                 className="btn btn-primary hero-btn"
               >
                 <Send size={18} />
-                <span>Book DJ Samizen</span>
+                <span>Book Dj Samizen</span>
               </button>
 
               <button 

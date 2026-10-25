@@ -16,35 +16,42 @@ import {
   AlertTriangle,
   CheckCircle,
   Copy,
-  Tag,
   Share2,
   X,
   UploadCloud,
   Info,
   ShieldCheck,
-  Check
+  Check,
+  Users,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 import {
+  supabase,
   checkBackendStatus,
   createEvent,
   updateEvent,
   deleteEvent,
   uploadFlyer,
-  deleteFlyer,
   getCurrentUser,
+  getUserRole,
   signInAdminWithPassword,
-  signInAdminWithOtp,
+  requestPasswordReset,
   signOutAdmin,
   updateBookingStatus,
   deleteBooking,
   createMix,
+  updateMix,
   deleteMix,
-  createCategory,
-  deleteCategory,
+  isValidYouTubeUrl,
+  extractYouTubeId,
   saveSocialLink,
-  deleteSocialLink,
-  updateProfile
+  updateProfile,
+  getTeamMembers,
+  addTeamMember,
+  updateTeamMemberStatus,
+  deleteTeamMember
 } from '../lib/supabase';
 
 export default function AdminDashboard({
@@ -57,41 +64,51 @@ export default function AdminDashboard({
   onRefreshData,
   onClose
 }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [passcode, setPasscode] = useState('');
-  const [authError, setAuthError] = useState('');
+  // Auth State
+  const [currentUser, setCurrentUser] = useState(null);
+  const [userRole, setUserRole] = useState(null); // 'owner' | 'dj' | 'unauthorized' | null
 
-  // Supabase Auth Integration
-  const [adminUser, setAdminUser] = useState(null);
-  const [loginTab, setLoginTab] = useState('passcode'); // 'passcode' | 'supabase'
-  const [supabaseEmail, setSupabaseEmail] = useState('josephngotho988@gmail.com');
-  const [supabasePassword, setSupabasePassword] = useState('');
-  const [supabaseAuthLoading, setSupabaseAuthLoading] = useState(false);
-  const [supabaseAuthFeedback, setSupabaseAuthFeedback] = useState({ type: '', message: '' });
+  // Login Form State
+  const [loginEmail, setLoginEmail] = useState('josephngotho988@gmail.com');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState('');
+  const [resetModal, setResetModal] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetMessage, setResetMessage] = useState({ type: '', text: '' });
 
-  // Visible Message Delivery (Toast banner)
-  const [toast, setToast] = useState(null);
-
-  const showToast = (type, title, message) => {
-    setToast({ type, title, message });
-    setTimeout(() => {
-      setToast(prev => (prev?.title === title ? null : prev));
-    }, 6000);
-  };
-
+  // Dashboard Nav & Feedback
   const [activeTab, setActiveTab] = useState('overview');
+  const [toast, setToast] = useState(null);
   const [backendStatus, setBackendStatus] = useState({ checked: false, online: false });
   const [sqlCopied, setSqlCopied] = useState(false);
 
-  // Events Form State
-  const [editingEvent, setEditingEvent] = useState(null);
+  // Team Members (Owner Only)
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [newDJEmail, setNewDJEmail] = useState('');
+  const [newDJName, setNewDJName] = useState('');
+  const [addingDJ, setAddingDJ] = useState(false);
+
+  // Social Links Local Drafts
+  const [socialDrafts, setSocialDrafts] = useState({
+    facebook: '',
+    youtube: '',
+    tiktok: '',
+    instagram: '',
+    x: ''
+  });
+  const [socialSaving, setSocialSaving] = useState({});
+
+  // Event Modal & Form State
   const [eventModal, setEventModal] = useState(false);
+  const [editingEvent, setEditingEvent] = useState(null);
   const [eventSubmitting, setEventSubmitting] = useState(false);
   const [eventSubmitError, setEventSubmitError] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
   const [flyerFile, setFlyerFile] = useState(null);
   const [flyerPreview, setFlyerPreview] = useState(null);
-
   const [eventFormData, setEventFormData] = useState({
     title: '',
     venue: '',
@@ -107,56 +124,51 @@ export default function AdminDashboard({
     status: 'upcoming'
   });
 
-  // Mixes Form
+  // Mix Modal & Form State (YouTube External Only)
   const [mixModal, setMixModal] = useState(false);
+  const [editingMix, setEditingMix] = useState(null);
+  const [mixSubmitting, setMixSubmitting] = useState(false);
+  const [mixSubmitError, setMixSubmitError] = useState('');
   const [mixFormData, setMixFormData] = useState({
     title: '',
     genre: 'Afro-Urban',
-    duration: '',
-    audio_url: '',
-    stream_url: '',
+    youtube_url: '',
     artwork_url: '',
-    tracklist: ''
-  });
-
-  // Category Form
-  const [catModal, setCatModal] = useState(false);
-  const [catFormData, setCatFormData] = useState({
-    name: '',
-    slug: '',
-    description: ''
+    duration: 'Live Set'
   });
 
   // Profile Form
   const [profileForm, setProfileForm] = useState({ ...profile });
-  const [profileSaved, setProfileSaved] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
 
-  // Social Links Form
-  const [socialModal, setSocialModal] = useState(false);
-  const [socialFormData, setSocialFormData] = useState({
-    platform: 'instagram',
-    url: '',
-    handle: ''
-  });
+  const showToast = (type, title, message) => {
+    setToast({ type, title, message });
+    setTimeout(() => {
+      setToast((prev) => (prev?.title === title ? null : prev));
+    }, 6000);
+  };
 
-  useEffect(() => {
-    checkBackend();
-    checkAuthUser();
-    if (localStorage.getItem('djsamizen_admin_auth') === 'true') {
-      setIsAuthenticated(true);
+  // Check auth session and user role
+  const checkSession = async () => {
+    try {
+      const user = await getCurrentUser();
+      if (user) {
+        setCurrentUser(user);
+        const role = await getUserRole(user);
+        setUserRole(role);
+      } else {
+        setCurrentUser(null);
+        setUserRole(null);
+      }
+    } catch {
+      setCurrentUser(null);
+      setUserRole(null);
     }
-  }, []);
+  };
 
-  useEffect(() => {
-    setProfileForm({ ...profile });
-  }, [profile]);
-
-  const checkAuthUser = async () => {
-    const user = await getCurrentUser();
-    if (user) {
-      setAdminUser(user);
-      setIsAuthenticated(true);
-    }
+  const loadTeam = async () => {
+    const list = await getTeamMembers();
+    setTeamMembers(list);
   };
 
   const checkBackend = async () => {
@@ -164,69 +176,110 @@ export default function AdminDashboard({
     setBackendStatus({ checked: true, ...res });
   };
 
-  const handlePasscodeLogin = (e) => {
+  useEffect(() => {
+    checkSession();
+    checkBackend();
+
+    // Listen to Supabase Auth state changes
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        setCurrentUser(session.user);
+        const role = await getUserRole(session.user);
+        setUserRole(role);
+      } else {
+        setCurrentUser(null);
+        setUserRole(null);
+      }
+    });
+
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    setProfileForm({ ...profile });
+  }, [profile]);
+
+  useEffect(() => {
+    // Populate social drafts from database
+    const drafts = { facebook: '', youtube: '', tiktok: '', instagram: '', x: '' };
+    socialLinks.forEach((s) => {
+      if (s.platform && s.url) {
+        drafts[s.platform.toLowerCase()] = s.url;
+      }
+    });
+    setSocialDrafts(drafts);
+  }, [socialLinks]);
+
+  useEffect(() => {
+    if (userRole === 'owner') {
+      loadTeam();
+    }
+  }, [userRole]);
+
+  // ----------------- AUTHENTICATION HANDLERS -----------------
+  const handleLogin = async (e) => {
     e.preventDefault();
-    if (passcode === 'samizen2026' || passcode === 'admin123') {
-      setIsAuthenticated(true);
-      localStorage.setItem('djsamizen_admin_auth', 'true');
-      setAuthError('');
-      showToast('success', 'Unlocked Dashboard', 'Signed in via passcode.');
-    } else {
-      setAuthError('Incorrect passcode. Try again.');
+    if (!loginEmail || !loginPassword) {
+      setLoginError('Please enter both email and password.');
+      return;
+    }
+
+    setLoginLoading(true);
+    setLoginError('');
+
+    const { user, error } = await signInAdminWithPassword(loginEmail, loginPassword);
+    setLoginLoading(false);
+
+    if (error) {
+      setLoginError(error.message || 'Invalid login credentials. Please check your password.');
+      return;
+    }
+
+    if (user) {
+      setCurrentUser(user);
+      const role = await getUserRole(user);
+      setUserRole(role);
+      showToast('success', 'Signed In', `Authenticated as ${user.email} (${role.toUpperCase()})`);
+      onRefreshData();
     }
   };
 
-  const handleSupabasePasswordLogin = async (e) => {
+  const handlePasswordReset = async (e) => {
     e.preventDefault();
-    setSupabaseAuthLoading(true);
-    setSupabaseAuthFeedback({ type: '', message: '' });
-
-    const { user, error } = await signInAdminWithPassword(supabaseEmail, supabasePassword);
-    setSupabaseAuthLoading(false);
-
-    if (error) {
-      setSupabaseAuthFeedback({
-        type: 'error',
-        message: error.message || 'Authentication rejected by Supabase Auth.'
-      });
-    } else if (user) {
-      setAdminUser(user);
-      setIsAuthenticated(true);
-      localStorage.setItem('djsamizen_admin_auth', 'true');
-      showToast('success', 'Authenticated with Supabase', `Signed in as ${user.email}`);
+    if (!resetEmail) {
+      setResetMessage({ type: 'error', text: 'Please enter your registered email address.' });
+      return;
     }
-  };
 
-  const handleSupabaseOtpLogin = async (e) => {
-    e.preventDefault();
-    setSupabaseAuthLoading(true);
-    setSupabaseAuthFeedback({ type: '', message: '' });
+    setResetLoading(true);
+    setResetMessage({ type: '', text: '' });
 
-    const { error } = await signInAdminWithOtp(supabaseEmail);
-    setSupabaseAuthLoading(false);
+    const { error } = await requestPasswordReset(resetEmail);
+    setResetLoading(false);
 
     if (error) {
-      setSupabaseAuthFeedback({
+      setResetMessage({
         type: 'error',
-        message: error.message || 'Could not send sign-in link.'
+        text: error.message || 'Could not send reset link. Rate limit or invalid email.'
       });
     } else {
-      setSupabaseAuthFeedback({
+      setResetMessage({
         type: 'success',
-        message: `Magic link dispatched to ${supabaseEmail}. Check your email to sign in directly!`
+        text: `Password reset instructions sent to ${resetEmail}. Check your inbox!`
       });
     }
   };
 
   const handleLogout = async () => {
     await signOutAdmin();
-    setAdminUser(null);
-    setIsAuthenticated(false);
-    localStorage.removeItem('djsamizen_admin_auth');
-    showToast('info', 'Logged Out', 'You have been signed out.');
+    setCurrentUser(null);
+    setUserRole(null);
+    showToast('info', 'Signed Out', 'You have been signed out from the portal.');
   };
 
-  // Event actions
+  // ----------------- EVENT ACTIONS -----------------
   const handleOpenAddEvent = () => {
     setEditingEvent(null);
     setEventFormData({
@@ -252,7 +305,20 @@ export default function AdminDashboard({
 
   const handleOpenEditEvent = (evt) => {
     setEditingEvent(evt);
-    setEventFormData({ ...evt });
+    setEventFormData({
+      title: evt.title || '',
+      venue: evt.venue || '',
+      city: evt.city || 'Nairobi',
+      event_date: evt.event_date || '',
+      event_time: evt.event_time || '21:00 - LATE',
+      description: evt.description || '',
+      flyer_path: evt.flyer_path || '',
+      flyer_url: evt.flyer_url || '',
+      ticket_url: evt.ticket_url || '',
+      category_id: evt.category_id || null,
+      category: evt.category || 'Club Night',
+      status: evt.status || 'upcoming'
+    });
     setFlyerFile(null);
     setFlyerPreview(evt.flyer_url || null);
     setFieldErrors({});
@@ -264,47 +330,34 @@ export default function AdminDashboard({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // MIME type check
-    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
-    if (!allowed.includes(file.type)) {
-      setFieldErrors(prev => ({ ...prev, flyer: 'Only JPEG, PNG, or WebP images are supported.' }));
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setFieldErrors((prev) => ({ ...prev, flyer: 'Please upload a JPEG, PNG, or WebP image.' }));
       return;
     }
 
-    // Size check (5MB)
     if (file.size > 5 * 1024 * 1024) {
-      setFieldErrors(prev => ({
-        ...prev,
-        flyer: `File is ${(file.size / (1024 * 1024)).toFixed(2)} MB. Limit is 5.00 MB.`
-      }));
+      setFieldErrors((prev) => ({ ...prev, flyer: 'Flyer image size must be under 5 MB.' }));
       return;
     }
-
-    setFieldErrors(prev => {
-      const copy = { ...prev };
-      delete copy.flyer;
-      return copy;
-    });
 
     setFlyerFile(file);
-    setFlyerPreview(URL.createObjectURL(file));
+    setFieldErrors((prev) => ({ ...prev, flyer: null }));
+    const reader = new FileReader();
+    reader.onloadend = () => setFlyerPreview(reader.result);
+    reader.readAsDataURL(file);
   };
 
   const handleSaveEvent = async (e) => {
     e.preventDefault();
     setEventSubmitError(null);
 
-    // 1. Client-side field validation
     const errors = {};
-    if (!eventFormData.title?.trim()) {
-      errors.title = 'Enter an event title.';
-    }
-    if (!eventFormData.event_date) {
-      errors.event_date = 'Select a valid event date.';
-    }
-    // Flyer validation: if new event, must provide a file or an existing flyer URL
-    if (!editingEvent && !flyerFile && !eventFormData.flyer_url?.trim()) {
-      errors.flyer = 'Select a flyer image (JPEG, PNG, WebP up to 5MB).';
+    if (!eventFormData.title.trim()) errors.title = 'Event title is required.';
+    if (!eventFormData.venue.trim()) errors.venue = 'Venue is required.';
+    if (!eventFormData.event_date) errors.event_date = 'Event date is required.';
+
+    if (!editingEvent && !flyerFile && !eventFormData.flyer_url) {
+      errors.flyer = 'A flyer image or URL is required for public event discovery.';
     }
 
     if (Object.keys(errors).length > 0) {
@@ -312,268 +365,282 @@ export default function AdminDashboard({
       return;
     }
 
-    setFieldErrors({});
     setEventSubmitting(true);
 
-    let finalFlyerPath = eventFormData.flyer_path || '';
-    let finalFlyerUrl = eventFormData.flyer_url || '';
-    let newlyUploadedPath = null;
+    let uploadedFlyerPath = eventFormData.flyer_path;
+    let uploadedFlyerUrl = eventFormData.flyer_url;
 
-    // 2. Storage upload if a new flyer file was chosen
     if (flyerFile) {
-      const uploadRes = await uploadFlyer(flyerFile, eventFormData.title);
-      if (uploadRes.error) {
+      const uploadResult = await uploadFlyer(flyerFile, eventFormData.title);
+      if (uploadResult.error) {
         setEventSubmitting(false);
-        const err = uploadRes.error;
-        const isRls = err.code === 'AccessDenied' || err.statusCode === 403 || err.status === 400;
-
         setEventSubmitError({
           heading: 'Flyer Upload Failed',
           operation: 'Storage Upload (event-flyers)',
-          code: err.code || err.statusCode || 'StorageError',
-          message: err.message || 'Storage rejected flyer upload.',
-          suggestion: isRls
-            ? 'Storage access was denied by RLS policy. To upload flyers directly, sign in with your authorized admin account (josephngotho988@gmail.com) via Supabase Auth.'
-            : 'Check that the image is a valid JPEG, PNG, or WebP under 5MB.'
+          message: uploadResult.error.message || 'Supabase Storage rejected flyer upload.',
+          details: 'Ensure bucket event-flyers exists and you have write permissions.',
+          code: uploadResult.error.statusCode || 'STORAGE_ERR'
         });
-
-        showToast('error', 'Flyer Upload Failed', err.message || 'Storage policy rejected upload.');
-        // KEEP MODAL OPEN, PRESERVE INPUTS!
+        showToast('error', 'Storage Error', uploadResult.error.message);
         return;
       }
-
-      newlyUploadedPath = uploadRes.data.path;
-      finalFlyerPath = uploadRes.data.path;
-      finalFlyerUrl = uploadRes.data.publicUrl;
+      uploadedFlyerPath = uploadResult.data.path;
+      uploadedFlyerUrl = uploadResult.data.publicUrl;
     }
 
-    // 3. Database Insert or Update
-    if (editingEvent) {
-      const payload = {
-        ...eventFormData,
-        flyer_path: finalFlyerPath || eventFormData.flyer_path,
-        flyer_url: finalFlyerUrl || eventFormData.flyer_url
-      };
+    if (!uploadedFlyerPath) {
+      const cleanSlug = eventFormData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      uploadedFlyerPath = `flyers/external-${cleanSlug}-${Date.now()}.png`;
+    }
 
+    const payload = {
+      ...eventFormData,
+      flyer_path: uploadedFlyerPath,
+      flyer_url: uploadedFlyerUrl,
+      is_published: true
+    };
+
+    if (editingEvent) {
       const res = await updateEvent(editingEvent.id, payload);
       setEventSubmitting(false);
-
       if (res.error) {
         setEventSubmitError({
           heading: 'Could Not Update Event',
           operation: 'Database Update (public.events)',
-          code: res.error.code || 'DB_ERROR',
-          message: res.error.message || 'Database rejected event update.',
-          details: res.error.details,
-          hint: res.error.hint,
-          suggestion: res.error.code === '42501'
-            ? 'Row Level Security policy rejected this update. Authenticate with your authorized admin account (josephngotho988@gmail.com).'
-            : 'Check that submitted values match table constraints.'
+          code: res.error.code,
+          message: res.error.message
         });
-
-        showToast('error', 'Could Not Update Event', res.error.message);
-        // KEEP MODAL OPEN!
+        showToast('error', 'Update Failed', res.error.message);
         return;
       }
-
-      // Success
       setEventModal(false);
-      setEditingEvent(null);
-      showToast('success', 'Event Updated Successfully', `"${eventFormData.title}" has been saved.`);
+      showToast('success', 'Event Updated', `"${payload.title}" updated successfully.`);
       onRefreshData();
     } else {
-      const payload = {
-        ...eventFormData,
-        flyer_path: finalFlyerPath || `manual/${Date.now()}`,
-        flyer_url: finalFlyerUrl
-      };
-
       const res = await createEvent(payload);
       setEventSubmitting(false);
-
       if (res.error) {
-        // Rollback orphan uploaded flyer
-        if (newlyUploadedPath) {
-          await deleteFlyer(newlyUploadedPath);
-        }
-
         setEventSubmitError({
           heading: 'Could Not Create Event',
           operation: 'Database Insert (public.events)',
-          code: res.error.code || 'DB_ERROR',
-          message: res.error.message || 'Database rejected event insertion.',
-          details: res.error.details,
-          hint: res.error.hint,
-          suggestion: res.error.code === '42501'
-            ? 'Row Level Security policy rejected this insert. Ensure you are signed in as authorized administrator (josephngotho988@gmail.com).'
-            : res.error.code === '23502'
-            ? `Required column missing: ${res.error.message}`
-            : 'Review the technical error details below.'
+          code: res.error.code,
+          message: res.error.message
         });
-
-        showToast('error', 'Could Not Create Event', res.error.message);
-        // KEEP MODAL OPEN, PRESERVE INPUTS!
+        showToast('error', 'Insert Failed', res.error.message);
         return;
       }
-
-      // Success!
       setEventModal(false);
-      setEditingEvent(null);
-      setFlyerFile(null);
-      setFlyerPreview(null);
-      showToast('success', 'Event Created Successfully', `"${res.data.title}" is now published on the public tour dates.`);
+      showToast('success', 'Event Published', `"${payload.title}" is now published.`);
       onRefreshData();
     }
   };
 
   const handleDeleteEvent = async (id, title = 'Event') => {
-    if (window.confirm(`Delete "${title}"?`)) {
+    if (window.confirm(`Delete event "${title}"?`)) {
       const res = await deleteEvent(id);
       if (res.error) {
-        showToast('error', 'Could Not Delete Event', res.error.message || 'Database error occurred.');
+        showToast('error', 'Delete Failed', res.error.message);
       } else {
-        showToast('info', 'Event Deleted', 'The event has been removed from the database.');
+        showToast('info', 'Event Removed', 'Event removed from database.');
         onRefreshData();
       }
     }
   };
 
-  // Booking actions
+  // ----------------- MIX ACTIONS (YOUTUBE EXTERNAL ONLY) -----------------
+  const handleOpenAddMix = () => {
+    setEditingMix(null);
+    setMixFormData({
+      title: '',
+      genre: categories[0]?.name || 'Afro-Urban',
+      youtube_url: '',
+      artwork_url: '',
+      duration: 'Live Set'
+    });
+    setMixSubmitError('');
+    setMixModal(true);
+  };
+
+  const handleOpenEditMix = (mix) => {
+    setEditingMix(mix);
+    setMixFormData({
+      title: mix.title || '',
+      genre: mix.genre || 'Afro-Urban',
+      youtube_url: mix.youtube_url || mix.audio_url || '',
+      artwork_url: mix.artwork_url || '',
+      duration: mix.duration || 'Live Set'
+    });
+    setMixSubmitError('');
+    setMixModal(true);
+  };
+
+  const handleSaveMix = async (e) => {
+    e.preventDefault();
+    setMixSubmitError('');
+
+    if (!mixFormData.title.trim()) {
+      setMixSubmitError('Mix title is required.');
+      return;
+    }
+
+    if (!isValidYouTubeUrl(mixFormData.youtube_url)) {
+      setMixSubmitError('Please enter a valid YouTube video URL (e.g. https://youtu.be/... or https://youtube.com/watch?v=...).');
+      return;
+    }
+
+    setMixSubmitting(true);
+
+    if (editingMix) {
+      const res = await updateMix(editingMix.id, mixFormData);
+      setMixSubmitting(false);
+      if (res.error) {
+        setMixSubmitError(res.error.message);
+        showToast('error', 'Update Failed', res.error.message);
+      } else {
+        setMixModal(false);
+        showToast('success', 'Mix Updated', `"${mixFormData.title}" updated.`);
+        onRefreshData();
+      }
+    } else {
+      const res = await createMix(mixFormData);
+      setMixSubmitting(false);
+      if (res.error) {
+        setMixSubmitError(res.error.message);
+        showToast('error', 'Create Failed', res.error.message);
+      } else {
+        setMixModal(false);
+        showToast('success', 'Mix Added', `"${mixFormData.title}" added to Sound Vault.`);
+        onRefreshData();
+      }
+    }
+  };
+
+  const handleDeleteMix = async (id, title = 'Mix') => {
+    if (window.confirm(`Delete mix "${title}"?`)) {
+      const res = await deleteMix(id);
+      if (res.error) {
+        showToast('error', 'Delete Failed', res.error.message);
+      } else {
+        showToast('info', 'Mix Removed', 'Mix removed from Sound Vault.');
+        onRefreshData();
+      }
+    }
+  };
+
+  // ----------------- SOCIAL ACTIONS (EDITABLE BY PLATFORM) -----------------
+  const handleSaveSingleSocial = async (platform) => {
+    const url = socialDrafts[platform];
+    if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
+      showToast('error', 'Invalid URL', 'Please enter a valid URL starting with https://');
+      return;
+    }
+
+    setSocialSaving((prev) => ({ ...prev, [platform]: true }));
+    const res = await saveSocialLink(platform, url);
+    setSocialSaving((prev) => ({ ...prev, [platform]: false }));
+
+    if (res.error) {
+      showToast('error', 'Save Failed', res.error.message);
+    } else {
+      showToast('success', 'Saved', `${platform.toUpperCase()} link updated.`);
+      onRefreshData();
+    }
+  };
+
+  // ----------------- TEAM MANAGEMENT (OWNER ONLY) -----------------
+  const handleAddDJ = async (e) => {
+    e.preventDefault();
+    if (!newDJEmail || !newDJEmail.includes('@')) {
+      showToast('error', 'Invalid Email', 'Please provide a valid DJ email address.');
+      return;
+    }
+
+    setAddingDJ(true);
+    const res = await addTeamMember(newDJEmail, 'dj', newDJName);
+    setAddingDJ(false);
+
+    if (res.error) {
+      showToast('error', 'Could Not Authorize DJ', res.error.message);
+    } else {
+      showToast('success', 'DJ Authorized', `${newDJEmail} has been granted DJ access.`);
+      setNewDJEmail('');
+      setNewDJName('');
+      loadTeam();
+    }
+  };
+
+  const handleToggleDJStatus = async (id, currentStatus) => {
+    const res = await updateTeamMemberStatus(id, !currentStatus);
+    if (res.error) {
+      showToast('error', 'Update Failed', res.error.message);
+    } else {
+      showToast('info', 'Status Changed', `Account status updated.`);
+      loadTeam();
+    }
+  };
+
+  const handleDeleteDJ = async (id, email) => {
+    if (window.confirm(`Remove DJ access for ${email}?`)) {
+      const res = await deleteTeamMember(id);
+      if (res.error) {
+        showToast('error', 'Delete Failed', res.error.message);
+      } else {
+        showToast('info', 'Access Revoked', `Account removed.`);
+        loadTeam();
+      }
+    }
+  };
+
+  // ----------------- BOOKING ACTIONS -----------------
   const handleUpdateBooking = async (id, status, notes) => {
     const res = await updateBookingStatus(id, status, notes);
     if (res.error) {
-      showToast('error', 'Could Not Update Booking', res.error.message);
+      showToast('error', 'Update Failed', res.error.message);
     } else {
-      showToast('success', 'Booking Updated', `Status changed to ${status}`);
+      showToast('success', 'Booking Updated', `Status changed to ${status}.`);
       onRefreshData();
     }
   };
 
   const handleDeleteBooking = async (id) => {
-    if (window.confirm('Delete this booking inquiry record?')) {
+    if (window.confirm('Delete this booking inquiry?')) {
       const res = await deleteBooking(id);
       if (res.error) {
-        showToast('error', 'Could Not Delete Booking', res.error.message);
+        showToast('error', 'Delete Failed', res.error.message);
       } else {
-        showToast('info', 'Booking Deleted', 'Record was removed.');
+        showToast('info', 'Inquiry Deleted', 'Record was removed.');
         onRefreshData();
       }
     }
   };
 
   const handleWhatsAppClient = (booking) => {
-    const phone = booking.client_phone.replace(/[^0-9]/g, '');
+    const phone = (booking.client_phone || '').replace(/[^0-9]/g, '');
     const text = encodeURIComponent(
-      `Hello ${booking.client_name}! This is the management team for DJ Samizen regarding your booking inquiry for ${booking.event_date}. We'd like to discuss the arrangements with you.`
+      `Hello ${booking.client_name}! This is the management team for Dj Samizen regarding your booking inquiry for ${booking.event_date}. We'd like to confirm arrangements with you.`
     );
     window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
   };
 
-  // Mix actions
-  const handleSaveMix = async (e) => {
-    e.preventDefault();
-    const res = await createMix(mixFormData);
-    if (res.error) {
-      showToast('error', 'Could Not Add Mix', res.error.message);
-    } else {
-      setMixModal(false);
-      setMixFormData({
-        title: '',
-        genre: 'Afro-Urban',
-        duration: '',
-        audio_url: '',
-        stream_url: '',
-        artwork_url: '',
-        tracklist: ''
-      });
-      showToast('success', 'Mix Added Successfully', `"${res.data.title}" added to audio vault.`);
-      onRefreshData();
-    }
-  };
-
-  const handleDeleteMix = async (id, title = 'Mix') => {
-    if (window.confirm(`Delete "${title}"?`)) {
-      const res = await deleteMix(id);
-      if (res.error) {
-        showToast('error', 'Could Not Delete Mix', res.error.message);
-      } else {
-        showToast('info', 'Mix Deleted', 'Mix removed from vault.');
-        onRefreshData();
-      }
-    }
-  };
-
-  // Category actions
-  const handleSaveCategory = async (e) => {
-    e.preventDefault();
-    const slug = catFormData.slug || catFormData.name.toLowerCase().replace(/\s+/g, '-');
-    const res = await createCategory({ ...catFormData, slug });
-    if (res.error) {
-      showToast('error', 'Could Not Create Category', res.error.message);
-    } else {
-      setCatModal(false);
-      setCatFormData({ name: '', slug: '', description: '' });
-      showToast('success', 'Category Created', `"${res.data.name}" genre category added.`);
-      onRefreshData();
-    }
-  };
-
-  const handleDeleteCategory = async (id, name = 'Category') => {
-    if (window.confirm(`Delete category "${name}"?`)) {
-      const res = await deleteCategory(id);
-      if (res.error) {
-        showToast('error', 'Could Not Delete Category', res.error.message);
-      } else {
-        showToast('info', 'Category Deleted', 'Genre category removed.');
-        onRefreshData();
-      }
-    }
-  };
-
-  // Social actions
-  const handleSaveSocial = async (e) => {
-    e.preventDefault();
-    const res = await saveSocialLink(socialFormData);
-    if (res.error) {
-      showToast('error', 'Could Not Save Social Channel', res.error.message);
-    } else {
-      setSocialModal(false);
-      setSocialFormData({ platform: 'instagram', url: '', handle: '' });
-      showToast('success', 'Social Link Saved', `${socialFormData.platform.toUpperCase()} channel linked.`);
-      onRefreshData();
-    }
-  };
-
-  const handleDeleteSocial = async (id) => {
-    if (window.confirm('Delete this social channel?')) {
-      const res = await deleteSocialLink(id);
-      if (res.error) {
-        showToast('error', 'Could Not Delete Social Channel', res.error.message);
-      } else {
-        showToast('info', 'Social Channel Removed', 'Channel deleted.');
-        onRefreshData();
-      }
-    }
-  };
-
-  // Profile save
+  // ----------------- PROFILE ACTION -----------------
   const handleSaveProfile = async (e) => {
     e.preventDefault();
+    setProfileSaving(true);
     const res = await updateProfile(profileForm);
+    setProfileSaving(false);
+
     if (res.error) {
-      showToast('error', 'Could Not Save Profile', res.error.message);
+      showToast('error', 'Profile Save Failed', res.error.message);
     } else {
-      setProfileSaved(true);
-      setTimeout(() => setProfileSaved(false), 3000);
-      showToast('success', 'Profile Saved Successfully', 'DJ Samizen brand information updated.');
+      showToast('success', 'Profile Saved', 'Dj Samizen profile information updated.');
       onRefreshData();
     }
   };
 
-  if (!isAuthenticated) {
+  // ----------------- RENDER LOGIN OVERLAY IF NOT AUTHENTICATED -----------------
+  if (!currentUser || userRole === 'unauthorized') {
     return (
       <div className="admin-login-overlay">
-        {/* Render Toast inside overlay */}
         {toast && (
           <div className="admin-toast-container">
             <div className={`admin-toast toast-${toast.type}`}>
@@ -586,7 +653,7 @@ export default function AdminDashboard({
                 <h4 className="toast-title">{toast.title}</h4>
                 <p className="toast-message">{toast.message}</p>
               </div>
-              <button onClick={() => setToast(null)} className="toast-close-btn" aria-label="Close Notification">
+              <button onClick={() => setToast(null)} className="toast-close-btn">
                 <X size={16} />
               </button>
             </div>
@@ -595,127 +662,134 @@ export default function AdminDashboard({
 
         <div className="admin-login-box">
           <div className="login-icon-hub">
-            <Lock size={32} className="login-icon" />
+            <Lock size={30} className="login-icon" />
           </div>
-          <h2 className="login-title">DJ SAMIZEN DASHBOARD</h2>
-          <p className="login-sub">Sign in to manage events, flyer storage, mixes, and bookings.</p>
+          <h2 className="login-title">DJ SAMIZEN PORTAL</h2>
+          <p className="login-sub">Sign in with your authorized credentials to manage events, mixes, and bookings.</p>
 
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.5rem' }}>
-            <button
-              type="button"
-              onClick={() => setLoginTab('passcode')}
-              style={{
-                flex: 1,
-                padding: '0.5rem',
-                backgroundColor: loginTab === 'passcode' ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
-                color: loginTab === 'passcode' ? '#f59e0b' : '#a1a1aa',
-                border: 'none',
-                borderRadius: '6px',
-                fontWeight: '600',
-                cursor: 'pointer'
-              }}
-            >
-              Passcode Unlock
-            </button>
-            <button
-              type="button"
-              onClick={() => setLoginTab('supabase')}
-              style={{
-                flex: 1,
-                padding: '0.5rem',
-                backgroundColor: loginTab === 'supabase' ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
-                color: loginTab === 'supabase' ? '#f59e0b' : '#a1a1aa',
-                border: 'none',
-                borderRadius: '6px',
-                fontWeight: '600',
-                cursor: 'pointer'
-              }}
-            >
-              Supabase Auth (Admin)
-            </button>
-          </div>
-
-          {loginTab === 'passcode' ? (
-            <form onSubmit={handlePasscodeLogin} className="login-form">
-              <input
-                type="password"
-                placeholder="Passcode (Default: samizen2026)"
-                value={passcode}
-                onChange={(e) => setPasscode(e.target.value)}
-                className="passcode-input"
-                autoFocus
-              />
-
-              {authError && <p className="auth-error-msg">{authError}</p>}
-
-              <button type="submit" className="btn btn-primary btn-full">
-                <span>Unlock Admin Panel</span>
+          {userRole === 'unauthorized' && (
+            <div className="auth-unauthorized-banner" style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid #ef4444', borderRadius: '8px', padding: '0.85rem', marginBottom: '1.25rem', color: '#fca5a5', fontSize: '0.85rem' }}>
+              <AlertTriangle size={16} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'text-bottom' }} />
+              <strong>Access Denied:</strong> {currentUser?.email} is not authorized. Sign in as <strong>josephngotho988@gmail.com</strong> or an authorized DJ account.
+              <button onClick={handleLogout} className="btn btn-outline btn-sm" style={{ marginTop: '0.65rem', width: '100%' }}>
+                Sign Out & Switch Account
               </button>
-            </form>
-          ) : (
-            <form onSubmit={handleSupabasePasswordLogin} className="login-form">
-              <div style={{ marginBottom: '0.75rem', textAlign: 'left' }}>
-                <label style={{ fontSize: '0.8rem', color: '#a1a1aa', display: 'block', marginBottom: '0.25rem' }}>Administrator Email</label>
-                <input
-                  type="email"
-                  value={supabaseEmail}
-                  onChange={(e) => setSupabaseEmail(e.target.value)}
-                  style={{ width: '100%', padding: '0.65rem', backgroundColor: '#0d0d12', border: '1px solid #26262e', color: '#fff', borderRadius: '6px' }}
-                />
-              </div>
-              <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
-                <label style={{ fontSize: '0.8rem', color: '#a1a1aa', display: 'block', marginBottom: '0.25rem' }}>Password</label>
-                <input
-                  type="password"
-                  placeholder="Enter Supabase account password"
-                  value={supabasePassword}
-                  onChange={(e) => setSupabasePassword(e.target.value)}
-                  style={{ width: '100%', padding: '0.65rem', backgroundColor: '#0d0d12', border: '1px solid #26262e', color: '#fff', borderRadius: '6px' }}
-                />
-              </div>
-
-              {supabaseAuthFeedback.message && (
-                <p style={{
-                  color: supabaseAuthFeedback.type === 'error' ? '#ef4444' : '#10b981',
-                  fontSize: '0.82rem',
-                  marginBottom: '1rem',
-                  textAlign: 'left'
-                }}>
-                  {supabaseAuthFeedback.message}
-                </p>
-              )}
-
-              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                <button
-                  type="submit"
-                  disabled={supabaseAuthLoading}
-                  className="btn btn-primary btn-full"
-                >
-                  <span>{supabaseAuthLoading ? 'Signing in...' : 'Sign In with Password'}</span>
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={handleSupabaseOtpLogin}
-                disabled={supabaseAuthLoading}
-                className="btn btn-secondary btn-full"
-                style={{ fontSize: '0.82rem' }}
-              >
-                <span>Send Magic Sign-In Link</span>
-              </button>
-            </form>
+            </div>
           )}
 
-          <button onClick={onClose} className="btn btn-outline btn-full back-site-btn">
-            <span>Return to Public Site</span>
+          <form onSubmit={handleLogin} className="login-form">
+            <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
+              <label style={{ fontSize: '0.8rem', color: '#a1a1aa', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+                Email Address
+              </label>
+              <input
+                type="email"
+                required
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                placeholder="josephngotho988@gmail.com"
+                style={{ width: '100%', padding: '0.75rem', backgroundColor: '#0e0e14', border: '1px solid #232330', color: '#fff', borderRadius: '8px', fontSize: '0.9rem' }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                <label style={{ fontSize: '0.8rem', color: '#a1a1aa', fontWeight: 600 }}>Password</label>
+                <button
+                  type="button"
+                  onClick={() => setResetModal(true)}
+                  className="forgot-password-link"
+                >
+                  Forgot password?
+                </button>
+              </div>
+
+              <div className="password-input-wrap">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  placeholder="Enter your account password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  style={{ width: '100%', padding: '0.75rem', backgroundColor: '#0e0e14', border: '1px solid #232330', color: '#fff', borderRadius: '8px', fontSize: '0.9rem' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="password-toggle-btn"
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                  aria-label="Toggle password visibility"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+
+            {loginError && (
+              <div style={{ color: '#ef4444', fontSize: '0.82rem', marginBottom: '1rem', textAlign: 'left', display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+                <span>{loginError}</span>
+              </div>
+            )}
+
+            <button type="submit" disabled={loginLoading} className="btn btn-primary btn-full" style={{ padding: '0.85rem' }}>
+              <span>{loginLoading ? 'Verifying Credentials...' : 'Sign In'}</span>
+            </button>
+          </form>
+
+          <button onClick={onClose} className="btn btn-outline btn-full back-site-btn" style={{ marginTop: '0.85rem' }}>
+            <span>Return to Public Website</span>
           </button>
         </div>
+
+        {/* Password Reset Modal */}
+        {resetModal && (
+          <div className="modal-backdrop" onClick={() => setResetModal(false)}>
+            <div className="modal-form-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '420px' }}>
+              <div className="modal-form-header">
+                <h3>Reset Password</h3>
+                <button onClick={() => setResetModal(false)} className="modal-close-btn">
+                  <X size={20} />
+                </button>
+              </div>
+              <form onSubmit={handlePasswordReset} style={{ padding: '1rem 0' }}>
+                <p style={{ fontSize: '0.85rem', color: '#a1a1aa', marginBottom: '1rem' }}>
+                  Enter your authorized account email to receive a secure password-reset link.
+                </p>
+                <div className="form-field" style={{ marginBottom: '1rem' }}>
+                  <label>Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="josephngotho988@gmail.com"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                  />
+                </div>
+
+                {resetMessage.text && (
+                  <p style={{ color: resetMessage.type === 'error' ? '#ef4444' : '#10b981', fontSize: '0.82rem', marginBottom: '1rem' }}>
+                    {resetMessage.text}
+                  </p>
+                )}
+
+                <div className="modal-form-actions">
+                  <button type="submit" disabled={resetLoading} className="btn btn-primary btn-full">
+                    <span>{resetLoading ? 'Sending link...' : 'Send Password Reset Link'}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
-  const upcomingCount = events.filter(e => e.status === 'upcoming').length;
-  const newBookingsCount = bookings.filter(b => b.status === 'new').length;
+  // ----------------- AUTHENTICATED DASHBOARD -----------------
+  const isOwner = userRole === 'owner';
+  const upcomingCount = events.filter((e) => e.status === 'upcoming').length;
+  const newBookingsCount = bookings.filter((b) => b.status === 'new').length;
 
   return (
     <div className="admin-dashboard-wrapper">
@@ -732,57 +806,45 @@ export default function AdminDashboard({
               <h4 className="toast-title">{toast.title}</h4>
               <p className="toast-message">{toast.message}</p>
             </div>
-            <button onClick={() => setToast(null)} className="toast-close-btn" aria-label="Close Notification">
+            <button onClick={() => setToast(null)} className="toast-close-btn">
               <X size={16} />
             </button>
           </div>
         </div>
       )}
 
-      {/* Top Bar */}
+      {/* Top Header */}
       <header className="admin-header">
         <div className="admin-header-left">
           <div className="admin-brand-tag">
-            <span>{profile.dj_name || 'DJ SAMIZEN'}</span>
-            <span className="admin-badge">ADMIN</span>
+            <span>{profile.dj_name || 'Dj Samizen'}</span>
+            <span className="admin-badge">{isOwner ? 'OWNER / ADMIN' : 'DJ PORTAL'}</span>
           </div>
         </div>
 
         <div className="admin-header-right">
-          {adminUser ? (
-            <div className="auth-badge-connected" title={`Authenticated with Supabase as ${adminUser.email}`}>
-              <ShieldCheck size={16} />
-              <span>{adminUser.email.split('@')[0]} (Admin)</span>
-            </div>
-          ) : (
-            <div className="auth-badge-anon" title="Signed in with passcode only. Authenticate with Supabase Auth for full storage upload permissions.">
-              <Lock size={14} />
-              <span>Passcode Session</span>
-            </div>
-          )}
-
-          <div className={`status-indicator ${backendStatus.online ? 'status-online' : 'status-fallback'}`}>
-            <span className="status-dot"></span>
-            <span>{backendStatus.online ? 'Supabase Connected' : 'Local Storage Mode'}</span>
+          <div className="auth-badge-connected" title={`Signed in as ${currentUser.email}`}>
+            <ShieldCheck size={16} />
+            <span>{currentUser.email}</span>
           </div>
 
-          <button onClick={onRefreshData} className="admin-icon-btn" title="Refresh Data">
+          <button onClick={onRefreshData} className="admin-icon-btn" title="Refresh Live Data">
             <RefreshCw size={16} />
           </button>
 
-          <button onClick={handleLogout} className="admin-icon-btn" title="Logout">
+          <button onClick={handleLogout} className="admin-icon-btn" title="Sign Out">
             <LogOut size={16} />
           </button>
 
           <button onClick={onClose} className="btn btn-secondary btn-sm">
-            <span>Exit Dashboard</span>
+            <span>Exit to Site</span>
           </button>
         </div>
       </header>
 
-      {/* Grid Layout */}
+      {/* Body Grid */}
       <div className="admin-body-grid">
-        {/* Sidebar */}
+        {/* Sidebar Nav */}
         <aside className="admin-sidebar">
           <nav className="admin-nav-tabs">
             <button
@@ -807,7 +869,7 @@ export default function AdminDashboard({
               className={`admin-tab-btn ${activeTab === 'events' ? 'active' : ''}`}
             >
               <Calendar size={18} />
-              <span>Events</span>
+              <span>Events & Flyers</span>
               <span className="tab-count-badge">{events.length}</span>
             </button>
 
@@ -816,27 +878,29 @@ export default function AdminDashboard({
               className={`admin-tab-btn ${activeTab === 'mixes' ? 'active' : ''}`}
             >
               <Radio size={18} />
-              <span>Mixes</span>
+              <span>YouTube Mixes</span>
               <span className="tab-count-badge">{mixes.length}</span>
             </button>
 
-            <button
-              onClick={() => setActiveTab('categories')}
-              className={`admin-tab-btn ${activeTab === 'categories' ? 'active' : ''}`}
-            >
-              <Tag size={18} />
-              <span>Categories / Genres</span>
-              <span className="tab-count-badge">{categories.length}</span>
-            </button>
+            {isOwner && (
+              <button
+                onClick={() => setActiveTab('socials')}
+                className={`admin-tab-btn ${activeTab === 'socials' ? 'active' : ''}`}
+              >
+                <Share2 size={18} />
+                <span>Social Links</span>
+              </button>
+            )}
 
-            <button
-              onClick={() => setActiveTab('socials')}
-              className={`admin-tab-btn ${activeTab === 'socials' ? 'active' : ''}`}
-            >
-              <Share2 size={18} />
-              <span>Social Links</span>
-              <span className="tab-count-badge">{socialLinks.length}</span>
-            </button>
+            {isOwner && (
+              <button
+                onClick={() => setActiveTab('team')}
+                className={`admin-tab-btn ${activeTab === 'team' ? 'active' : ''}`}
+              >
+                <Users size={18} />
+                <span>Team & DJ Access</span>
+              </button>
+            )}
 
             <button
               onClick={() => setActiveTab('profile')}
@@ -846,18 +910,19 @@ export default function AdminDashboard({
               <span>Profile & Contacts</span>
             </button>
 
-            <button
-              onClick={() => setActiveTab('database')}
-              className={`admin-tab-btn ${activeTab === 'database' ? 'active' : ''}`}
-            >
-              <Database size={18} />
-              <span>Database Setup</span>
-              {!backendStatus.online && <span className="tab-alert-badge">!</span>}
-            </button>
+            {isOwner && (
+              <button
+                onClick={() => setActiveTab('database')}
+                className={`admin-tab-btn ${activeTab === 'database' ? 'active' : ''}`}
+              >
+                <Database size={18} />
+                <span>Database Setup</span>
+              </button>
+            )}
           </nav>
         </aside>
 
-        {/* Main Panel */}
+        {/* Main Content Area */}
         <main className="admin-main-panel">
           {/* TAB: OVERVIEW */}
           {activeTab === 'overview' && (
@@ -865,65 +930,68 @@ export default function AdminDashboard({
               <div className="tab-header-row">
                 <div>
                   <h2 className="tab-main-title">Management Overview</h2>
-                  <p className="tab-main-sub">Real-time statistics driven entirely by your actual records.</p>
+                  <p className="tab-main-sub">Real-time stats from your live Supabase database.</p>
                 </div>
               </div>
 
-              {/* Real counters - Zero fabrication */}
               <div className="admin-metrics-row">
                 <div className="admin-stat-card">
-                  <span className="stat-label">Upcoming Events</span>
+                  <span className="stat-label">Upcoming Dates</span>
                   <span className="stat-value">{upcomingCount}</span>
-                  <span className="stat-sub">Active public dates</span>
+                  <span className="stat-sub">Live events on tour schedule</span>
                 </div>
                 <div className="admin-stat-card">
                   <span className="stat-label">Booking Inquiries</span>
                   <span className="stat-value">{bookings.length}</span>
-                  <span className="stat-sub">{newBookingsCount} awaiting response</span>
+                  <span className="stat-sub">{newBookingsCount} new submissions</span>
                 </div>
                 <div className="admin-stat-card">
-                  <span className="stat-label">Published Mixes</span>
+                  <span className="stat-label">YouTube Mixes</span>
                   <span className="stat-value">{mixes.length}</span>
-                  <span className="stat-sub">Audio sets in vault</span>
+                  <span className="stat-sub">Sound vault sets published</span>
                 </div>
                 <div className="admin-stat-card">
-                  <span className="stat-label">Sound Categories</span>
-                  <span className="stat-value">{categories.length}</span>
-                  <span className="stat-sub">Curated genres</span>
+                  <span className="stat-label">Role Access</span>
+                  <span className="stat-value" style={{ textTransform: 'uppercase', color: 'var(--accent-orange)' }}>
+                    {userRole}
+                  </span>
+                  <span className="stat-sub">{currentUser.email}</span>
                 </div>
               </div>
 
               <div className="admin-quick-actions-card">
                 <h3>Quick Management Actions</h3>
                 <div className="quick-actions-grid">
-                  <button onClick={() => { setActiveTab('events'); setEditingEvent(null); setEventModal(true); }} className="btn btn-secondary">
+                  <button onClick={handleOpenAddEvent} className="btn btn-secondary">
                     <Plus size={16} />
-                    <span>Post New Event</span>
+                    <span>Create Event & Upload Flyer</span>
                   </button>
-                  <button onClick={() => { setActiveTab('mixes'); setMixModal(true); }} className="btn btn-secondary">
+                  <button onClick={handleOpenAddMix} className="btn btn-secondary">
                     <Plus size={16} />
-                    <span>Upload Mix Details</span>
+                    <span>Add YouTube Mix</span>
                   </button>
                   <button onClick={() => setActiveTab('bookings')} className="btn btn-secondary">
                     <Send size={16} />
-                    <span>Review Inquiries</span>
+                    <span>Review Booking Requests</span>
                   </button>
-                  <button onClick={() => setActiveTab('profile')} className="btn btn-secondary">
-                    <User size={16} />
-                    <span>Edit Profile & Phone</span>
-                  </button>
+                  {isOwner && (
+                    <button onClick={() => setActiveTab('socials')} className="btn btn-secondary">
+                      <Share2 size={16} />
+                      <span>Edit Social Media Links</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
           )}
 
-          {/* TAB: BOOKINGS */}
+          {/* TAB: BOOKINGS (INQUIRIES) */}
           {activeTab === 'bookings' && (
             <div className="admin-tab-content">
               <div className="tab-header-row">
                 <div>
                   <h2 className="tab-main-title">Client Booking Inquiries</h2>
-                  <p className="tab-main-sub">Submissions received via the website inquiry form.</p>
+                  <p className="tab-main-sub">Client submissions sent via the public website inquiry engine.</p>
                 </div>
               </div>
 
@@ -931,9 +999,9 @@ export default function AdminDashboard({
                 <table className="admin-table">
                   <thead>
                     <tr>
-                      <th>Organizer / Client</th>
+                      <th>Client / Contact</th>
                       <th>Event Details</th>
-                      <th>Preferences</th>
+                      <th>Notes & Preferences</th>
                       <th>Status</th>
                       <th>Actions</th>
                     </tr>
@@ -942,7 +1010,7 @@ export default function AdminDashboard({
                     {bookings.length === 0 ? (
                       <tr>
                         <td colSpan="5" className="empty-table-cell">
-                          No booking inquiries logged yet. When clients submit the booking form, inquiries will appear here.
+                          No booking inquiries logged in database yet.
                         </td>
                       </tr>
                     ) : (
@@ -955,44 +1023,49 @@ export default function AdminDashboard({
                           </td>
                           <td>
                             <div className="cell-primary">{bk.event_type}</div>
-                            <div className="cell-meta">Date: {bk.event_date}</div>
+                            <div className="cell-meta">Date: <strong>{bk.event_date}</strong></div>
                             <div className="cell-meta">Location: {bk.event_location}</div>
                           </td>
-                          <td>
-                            <div className="cell-notes">{bk.music_preferences || 'None specified'}</div>
+                          <td style={{ maxWidth: '320px', fontSize: '0.84rem' }}>
+                            {bk.music_preferences || 'None provided'}
+                            {bk.admin_notes && (
+                              <div style={{ marginTop: '0.4rem', color: '#f59e0b', fontSize: '0.78rem' }}>
+                                <strong>Admin Notes:</strong> {bk.admin_notes}
+                              </div>
+                            )}
                           </td>
                           <td>
                             <select
                               value={bk.status || 'new'}
-                              onChange={(e) => handleUpdateBooking(bk.id, e.target.value)}
-                              className={`status-select status-${bk.status || 'new'}`}
+                              onChange={(e) => handleUpdateBooking(bk.id, e.target.value, bk.admin_notes)}
+                              className="table-status-select"
+                              style={{ padding: '0.35rem', borderRadius: '4px', background: '#1c1c28', color: '#fff', border: '1px solid #333' }}
                             >
                               <option value="new">New</option>
-                              <option value="in_discussion">In Discussion</option>
                               <option value="confirmed">Confirmed</option>
+                              <option value="in_progress">In Progress</option>
                               <option value="completed">Completed</option>
                               <option value="declined">Declined</option>
                             </select>
                           </td>
                           <td>
-                            <div className="table-actions-cell">
-                              {bk.client_phone && (
+                            <div className="action-buttons-cell">
+                              <button
+                                onClick={() => handleWhatsAppClient(bk)}
+                                className="action-btn-whatsapp"
+                                title="Chat on WhatsApp"
+                              >
+                                <MessageSquare size={15} />
+                              </button>
+                              {isOwner && (
                                 <button
-                                  onClick={() => handleWhatsAppClient(bk)}
-                                  className="action-btn-whatsapp"
-                                  title="Reply on WhatsApp"
+                                  onClick={() => handleDeleteBooking(bk.id)}
+                                  className="action-btn-delete"
+                                  title="Delete Record"
                                 >
-                                  <MessageSquare size={16} />
-                                  <span>WhatsApp</span>
+                                  <Trash2 size={15} />
                                 </button>
                               )}
-                              <button
-                                onClick={() => handleDeleteBooking(bk.id)}
-                                className="action-btn-delete"
-                                title="Delete"
-                              >
-                                <Trash2 size={16} />
-                              </button>
                             </div>
                           </td>
                         </tr>
@@ -1009,168 +1082,305 @@ export default function AdminDashboard({
             <div className="admin-tab-content">
               <div className="tab-header-row">
                 <div>
-                  <h2 className="tab-main-title">Events & Gigs Manager</h2>
-                  <p className="tab-main-sub">Add and maintain real tour dates and club appearances.</p>
+                  <h2 className="tab-main-title">Tour Events & Official Flyers</h2>
+                  <p className="tab-main-sub">Manage upcoming gigs and upload 4:5 portrait flyers.</p>
                 </div>
-                <button
-                  onClick={handleOpenAddEvent}
-                  className="btn btn-primary btn-sm"
-                >
+                <button onClick={handleOpenAddEvent} className="btn btn-primary btn-sm">
                   <Plus size={16} />
-                  <span>Add Event</span>
+                  <span>Create Event</span>
                 </button>
               </div>
 
-              {events.length === 0 ? (
-                <div className="empty-state-card">
-                  <p>No events in database. Click "Add Event" to post an upcoming performance.</p>
-                </div>
-              ) : (
-                <div className="admin-events-grid">
-                  {events.map((evt) => (
+              <div className="admin-events-grid">
+                {events.length === 0 ? (
+                  <div className="empty-state-card">
+                    <p>No events in database. Click "Create Event" to post an upcoming date with its flyer.</p>
+                  </div>
+                ) : (
+                  events.map((evt) => (
                     <div key={evt.id} className="admin-event-card">
-                      {evt.flyer_url && (
-                        <div className="admin-evt-thumb">
-                          <img src={evt.flyer_url} alt={evt.title} />
-                        </div>
-                      )}
-                      <div className="admin-evt-info">
-                        <div className="admin-evt-tags">
-                          {evt.category && <span className="badge badge-tag">{evt.category}</span>}
-                          <span className={`badge ${evt.status === 'upcoming' ? 'badge-live' : 'badge-tag'}`}>
-                            {evt.status.toUpperCase()}
-                          </span>
-                        </div>
-                        <h3>{evt.title}</h3>
-                        <p className="admin-evt-venue">{evt.venue} — {evt.city}</p>
-                        <p className="admin-evt-date">Date: {evt.event_date} ({evt.event_time})</p>
+                      <div className="admin-event-flyer-thumb">
+                        <img
+                          src={evt.flyer_url || '/images/dj-samizen.png'}
+                          alt={evt.title}
+                          onError={(e) => {
+                            e.currentTarget.src = '/images/dj-samizen.png';
+                          }}
+                        />
                       </div>
-                      <div className="admin-evt-actions">
-                        <button
-                          onClick={() => handleOpenEditEvent(evt)}
-                          className="btn btn-secondary btn-sm"
-                        >
-                          <Edit2 size={14} />
-                          <span>Edit</span>
-                        </button>
-                        <button
-                          onClick={() => handleDeleteEvent(evt.id, evt.title)}
-                          className="btn btn-outline btn-sm delete-btn"
-                          title="Delete Event"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                      <div className="admin-event-details">
+                        <div className="admin-event-badges">
+                          <span className="badge badge-tag">{evt.status?.toUpperCase() || 'UPCOMING'}</span>
+                          {evt.category && <span className="badge badge-tag">{evt.category}</span>}
+                        </div>
+                        <h4>{evt.title}</h4>
+                        <div className="cell-meta">📅 {evt.event_date} {evt.event_time ? `• ${evt.event_time}` : ''}</div>
+                        <div className="cell-meta">📍 {evt.venue}{evt.city ? `, ${evt.city}` : ''}</div>
+                        <div className="admin-event-actions-row">
+                          <button onClick={() => handleOpenEditEvent(evt)} className="btn btn-secondary btn-sm">
+                            <Edit2 size={14} />
+                            <span>Edit</span>
+                          </button>
+                          <button onClick={() => handleDeleteEvent(evt.id, evt.title)} className="action-btn-delete">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                  ))
+                )}
+              </div>
             </div>
           )}
 
-          {/* TAB: MIXES */}
+          {/* TAB: MIXES (YOUTUBE EXTERNAL ONLY) */}
           {activeTab === 'mixes' && (
             <div className="admin-tab-content">
               <div className="tab-header-row">
                 <div>
-                  <h2 className="tab-main-title">Mixes & Audio Vault</h2>
-                  <p className="tab-main-sub">Manage mixes and sound streams available on the public player.</p>
+                  <h2 className="tab-main-title">YouTube Mixes & Sound Vault</h2>
+                  <p className="tab-main-sub">Publish external YouTube live sets and club sessions (no local MP3 hosting).</p>
                 </div>
-                <button onClick={() => setMixModal(true)} className="btn btn-primary btn-sm">
+                <button onClick={handleOpenAddMix} className="btn btn-primary btn-sm">
                   <Plus size={16} />
                   <span>Add Mix</span>
                 </button>
               </div>
 
-              {mixes.length === 0 ? (
-                <div className="empty-state-card">
-                  <p>No mixes currently added. Click "Add Mix" to link an MP3 or streaming set.</p>
-                </div>
-              ) : (
-                <div className="admin-mixes-list">
-                  {mixes.map((mix) => (
-                    <div key={mix.id} className="admin-mix-row">
-                      <div className="admin-mix-details">
-                        <h4>{mix.title}</h4>
-                        <p>{mix.genre} {mix.duration ? `• ${mix.duration}` : ''}</p>
-                        {mix.audio_url && <span className="cell-meta">Audio: {mix.audio_url}</span>}
-                        {mix.stream_url && <span className="cell-meta">Stream: {mix.stream_url}</span>}
-                      </div>
-                      <button onClick={() => handleDeleteMix(mix.id)} className="btn btn-outline btn-sm delete-btn">
-                        <Trash2 size={14} />
-                        <span>Delete</span>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB: CATEGORIES */}
-          {activeTab === 'categories' && (
-            <div className="admin-tab-content">
-              <div className="tab-header-row">
-                <div>
-                  <h2 className="tab-main-title">Event Categories & Genres</h2>
-                  <p className="tab-main-sub">Categories used to tag events and define the musical palette.</p>
-                </div>
-                <button onClick={() => setCatModal(true)} className="btn btn-primary btn-sm">
-                  <Plus size={16} />
-                  <span>Add Category</span>
-                </button>
-              </div>
-
-              <div className="admin-categories-grid">
-                {categories.map((cat) => (
-                  <div key={cat.id || cat.slug} className="admin-cat-card">
-                    <div>
-                      <h4>{cat.name}</h4>
-                      <p className="cell-sub">{cat.description || 'No description'}</p>
-                    </div>
-                    <button onClick={() => handleDeleteCategory(cat.id)} className="action-btn-delete">
-                      <Trash2 size={14} />
-                    </button>
+              <div className="admin-mixes-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.25rem' }}>
+                {mixes.length === 0 ? (
+                  <div className="empty-state-card" style={{ gridColumn: '1 / -1' }}>
+                    <p>No mixes in database. Click "Add Mix" to paste a YouTube set link.</p>
                   </div>
-                ))}
+                ) : (
+                  mixes.map((mix) => {
+                    const targetUrl = mix.youtube_url || mix.audio_url || '#';
+                    const ytId = extractYouTubeId(targetUrl);
+                    const thumb = mix.artwork_url || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : '/images/dj-samizen.png');
+
+                    return (
+                      <div key={mix.id} className="admin-mix-card" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ width: '100%', aspectRatio: '16/9', overflow: 'hidden', borderRadius: '6px', marginBottom: '0.75rem', position: 'relative' }}>
+                          <img
+                            src={thumb}
+                            alt={mix.title}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            onError={(e) => {
+                              e.currentTarget.src = '/images/dj-samizen.png';
+                            }}
+                          />
+                          {mix.duration && (
+                            <span style={{ position: 'absolute', bottom: '6px', right: '6px', background: 'rgba(0,0,0,0.8)', color: '#fff', fontSize: '0.7rem', padding: '2px 6px', borderRadius: '4px' }}>
+                              {mix.duration}
+                            </span>
+                          )}
+                        </div>
+
+                        <span style={{ fontSize: '0.72rem', color: 'var(--accent-orange)', fontWeight: 700, textTransform: 'uppercase' }}>
+                          {mix.genre || 'Afro-Urban'}
+                        </span>
+                        <h4 style={{ margin: '0.25rem 0 0.5rem', fontSize: '0.95rem' }}>{mix.title}</h4>
+
+                        <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          <a
+                            href={targetUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-secondary btn-sm"
+                            style={{ flex: 1, fontSize: '0.78rem' }}
+                          >
+                            <ExternalLink size={13} />
+                            <span>Watch</span>
+                          </a>
+                          <button onClick={() => handleOpenEditMix(mix)} className="btn btn-secondary btn-sm" title="Edit">
+                            <Edit2 size={13} />
+                          </button>
+                          <button onClick={() => handleDeleteMix(mix.id, mix.title)} className="action-btn-delete" title="Delete">
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           )}
 
-          {/* TAB: SOCIAL LINKS */}
-          {activeTab === 'socials' && (
+          {/* TAB: SOCIAL LINKS (EDITABLE BY PLATFORM) */}
+          {activeTab === 'socials' && isOwner && (
             <div className="admin-tab-content">
               <div className="tab-header-row">
                 <div>
-                  <h2 className="tab-main-title">Official Social Links</h2>
-                  <p className="tab-main-sub">Add only legitimate social profiles (Instagram, TikTok, YouTube, SoundCloud, Mixcloud).</p>
+                  <h2 className="tab-main-title">Official Social Media Channels</h2>
+                  <p className="tab-main-sub">
+                    Directly edit each platform's profile URL. Blank links are automatically excluded from the public site.
+                  </p>
                 </div>
-                <button onClick={() => setSocialModal(true)} className="btn btn-primary btn-sm">
-                  <Plus size={16} />
-                  <span>Add Channel</span>
-                </button>
               </div>
 
-              {socialLinks.length === 0 ? (
-                <div className="empty-state-card">
-                  <p>No social links configured yet. Add your official accounts to display them in the website footer.</p>
-                </div>
-              ) : (
-                <div className="admin-socials-list">
-                  {socialLinks.map((soc) => (
-                    <div key={soc.id || soc.platform} className="admin-social-row">
-                      <div className="admin-social-info">
-                        <strong>{soc.platform.toUpperCase()}</strong>
-                        <span className="cell-sub">{soc.url}</span>
-                        {soc.handle && <span className="cell-meta">({soc.handle})</span>}
+              <div className="social-editor-grid">
+                {['facebook', 'youtube', 'tiktok', 'instagram', 'x'].map((platform) => {
+                  const currentVal = socialDrafts[platform] || '';
+                  const isConfigured = Boolean(currentVal.trim());
+
+                  return (
+                    <div key={platform} className="social-editor-row">
+                      <div className="social-platform-badge">
+                        <span style={{ textTransform: 'capitalize' }}>{platform === 'x' ? 'X (Twitter)' : platform}</span>
+                        {isConfigured ? (
+                          <span className="badge badge-live" style={{ fontSize: '0.65rem' }}>ACTIVE</span>
+                        ) : (
+                          <span className="badge badge-tag" style={{ fontSize: '0.65rem' }}>BLANK</span>
+                        )}
                       </div>
-                      <button onClick={() => handleDeleteSocial(soc.id)} className="action-btn-delete">
-                        <Trash2 size={14} />
-                      </button>
+
+                      <input
+                        type="url"
+                        placeholder={`https://${platform === 'x' ? 'x.com' : platform + '.com'}/your-profile`}
+                        value={currentVal}
+                        onChange={(e) =>
+                          setSocialDrafts({ ...socialDrafts, [platform]: e.target.value })
+                        }
+                        className="social-input-field"
+                      />
+
+                      <div className="social-actions-group">
+                        <button
+                          type="button"
+                          disabled={socialSaving[platform]}
+                          onClick={() => handleSaveSingleSocial(platform)}
+                          className="btn btn-primary btn-sm"
+                        >
+                          <Check size={14} />
+                          <span>{socialSaving[platform] ? 'Saving...' : 'Save'}</span>
+                        </button>
+
+                        {isConfigured && (
+                          <a
+                            href={currentVal}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-outline btn-sm"
+                            title="Test Link"
+                          >
+                            <ExternalLink size={14} />
+                          </a>
+                        )}
+                      </div>
                     </div>
-                  ))}
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: TEAM & DJ ACCESS (OWNER ONLY) */}
+          {activeTab === 'team' && isOwner && (
+            <div className="admin-tab-content">
+              <div className="tab-header-row">
+                <div>
+                  <h2 className="tab-main-title">Team & DJ Access Management</h2>
+                  <p className="tab-main-sub">Authorize team members to manage events and mixes without giving them owner privileges.</p>
                 </div>
-              )}
+              </div>
+
+              {/* Add DJ Form */}
+              <div className="admin-form-card" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: '10px', padding: '1.25rem', marginBottom: '2rem' }}>
+                <h3 style={{ marginBottom: '1rem', fontSize: '1rem' }}>Authorize New DJ / Manager</h3>
+                <form onSubmit={handleAddDJ} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr auto', gap: '1rem', alignItems: 'flex-end' }}>
+                  <div className="form-field" style={{ margin: 0 }}>
+                    <label>DJ Email Address *</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="dj.name@example.com"
+                      value={newDJEmail}
+                      onChange={(e) => setNewDJEmail(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-field" style={{ margin: 0 }}>
+                    <label>Display Name (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="DJ Samizen Co-Host"
+                      value={newDJName}
+                      onChange={(e) => setNewDJName(e.target.value)}
+                    />
+                  </div>
+                  <button type="submit" disabled={addingDJ} className="btn btn-primary" style={{ height: '42px' }}>
+                    <Plus size={16} />
+                    <span>{addingDJ ? 'Authorizing...' : 'Authorize Account'}</span>
+                  </button>
+                </form>
+              </div>
+
+              {/* Team Members List */}
+              <div className="admin-table-wrap">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Team Member</th>
+                      <th>Role</th>
+                      <th>Access Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>
+                        <strong>josephngotho988@gmail.com</strong>
+                        <div className="cell-sub">Primary Platform Administrator</div>
+                      </td>
+                      <td>
+                        <span className="badge badge-live">OWNER</span>
+                      </td>
+                      <td>
+                        <span style={{ color: '#10b981', fontWeight: 600, fontSize: '0.85rem' }}>Active Permanent</span>
+                      </td>
+                      <td>
+                        <span className="cell-meta">Primary Admin</span>
+                      </td>
+                    </tr>
+                    {teamMembers.map((tm) => {
+                      if (tm.email.toLowerCase() === 'josephngotho988@gmail.com') return null;
+                      return (
+                        <tr key={tm.id}>
+                          <td>
+                            <strong>{tm.display_name || tm.email}</strong>
+                            <div className="cell-sub">{tm.email}</div>
+                          </td>
+                          <td>
+                            <span className="badge badge-tag" style={{ textTransform: 'uppercase' }}>{tm.role}</span>
+                          </td>
+                          <td>
+                            <span style={{ color: tm.is_active ? '#10b981' : '#ef4444', fontWeight: 600, fontSize: '0.85rem' }}>
+                              {tm.is_active ? 'Active' : 'Deactivated'}
+                            </span>
+                          </td>
+                          <td>
+                            <div className="action-buttons-cell">
+                              <button
+                                onClick={() => handleToggleDJStatus(tm.id, tm.is_active)}
+                                className="btn btn-secondary btn-sm"
+                              >
+                                {tm.is_active ? 'Deactivate' : 'Activate'}
+                              </button>
+                              <button
+                                onClick={() => handleDeleteDJ(tm.id, tm.email)}
+                                className="action-btn-delete"
+                                title="Revoke Access"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -1179,19 +1389,12 @@ export default function AdminDashboard({
             <div className="admin-tab-content">
               <div className="tab-header-row">
                 <div>
-                  <h2 className="tab-main-title">DJ Profile & Contact Information</h2>
-                  <p className="tab-main-sub">Update artist bio, contact channels, and stage location.</p>
+                  <h2 className="tab-main-title">Profile, Biography & Direct Contacts</h2>
+                  <p className="tab-main-sub">Update artist bio, contact information, and stage location.</p>
                 </div>
               </div>
 
               <form onSubmit={handleSaveProfile} className="admin-profile-form">
-                {profileSaved && (
-                  <div className="save-success-banner">
-                    <CheckCircle size={18} />
-                    <span>Profile settings saved successfully!</span>
-                  </div>
-                )}
-
                 <div className="form-grid-2">
                   <div className="form-field">
                     <label>Stage Name</label>
@@ -1253,26 +1456,6 @@ export default function AdminDashboard({
                 </div>
 
                 <div className="form-field">
-                  <label>Club Residency (Optional)</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Westlands, Nairobi"
-                    value={profileForm.residency || ''}
-                    onChange={(e) => setProfileForm({ ...profileForm, residency: e.target.value })}
-                  />
-                </div>
-
-                <div className="form-field">
-                  <label>DJ Portrait Image URL (Leave blank to use minimalist graphic fallback)</label>
-                  <input
-                    type="url"
-                    placeholder="https://..."
-                    value={profileForm.hero_image_url || ''}
-                    onChange={(e) => setProfileForm({ ...profileForm, hero_image_url: e.target.value })}
-                  />
-                </div>
-
-                <div className="form-field">
                   <label>Artist Bio</label>
                   <textarea
                     rows="5"
@@ -1281,20 +1464,20 @@ export default function AdminDashboard({
                   ></textarea>
                 </div>
 
-                <button type="submit" className="btn btn-primary">
-                  <span>Save Profile</span>
+                <button type="submit" disabled={profileSaving} className="btn btn-primary">
+                  <span>{profileSaving ? 'Saving Profile...' : 'Save Profile'}</span>
                 </button>
               </form>
             </div>
           )}
 
           {/* TAB: DATABASE SETUP */}
-          {activeTab === 'database' && (
+          {activeTab === 'database' && isOwner && (
             <div className="admin-tab-content">
               <div className="tab-header-row">
                 <div>
-                  <h2 className="tab-main-title">Supabase Database Connection</h2>
-                  <p className="tab-main-sub">Verify connection to project `mkjzswvnrqvnedqdgukg`.</p>
+                  <h2 className="tab-main-title">Database Status & Security Policies</h2>
+                  <p className="tab-main-sub">Verify connection to Supabase project mkjzswvnrqvnedqdgukg.</p>
                 </div>
               </div>
 
@@ -1308,7 +1491,7 @@ export default function AdminDashboard({
                   ) : (
                     <div className="db-badge-fallback">
                       <AlertTriangle size={20} />
-                      <span>Database Tables Pending in Supabase SQL Editor</span>
+                      <span>Checking connection...</span>
                     </div>
                   )}
                   <button onClick={checkBackend} className="btn btn-secondary btn-sm">
@@ -1318,19 +1501,31 @@ export default function AdminDashboard({
                 </div>
 
                 <div className="migration-instructions-box">
-                  <h3>Run SQL Schema:</h3>
+                  <h3>Production SQL Migration:</h3>
+                  <p style={{ fontSize: '0.85rem', color: '#a1a1aa', marginBottom: '1rem' }}>
+                    To ensure Row Level Security policies, storage policies, and team member tables are active on your Supabase project, execute the migration script in the SQL editor:
+                  </p>
                   <ol className="step-list">
-                    <li>Open your Supabase project: <a href="https://supabase.com/dashboard/project/mkjzswvnrqvnedqdgukg/sql/new" target="_blank" rel="noreferrer" className="supabase-link">Open Supabase SQL Editor <ExternalLink size={14} /></a></li>
+                    <li>
+                      Open your Supabase project:{' '}
+                      <a
+                        href="https://supabase.com/dashboard/project/mkjzswvnrqvnedqdgukg/sql/new"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="supabase-link"
+                      >
+                        Open Supabase SQL Editor <ExternalLink size={14} />
+                      </a>
+                    </li>
                     <li>Copy the clean production schema below and paste it into the editor.</li>
                     <li>Click <strong>Run</strong> in Supabase.</li>
-                    <li>Click "Re-check Connection" above to verify.</li>
                   </ol>
 
                   <button
                     onClick={() => {
                       fetch('/supabase/schema.sql')
-                        .then(r => r.text())
-                        .then(text => {
+                        .then((r) => r.text())
+                        .then((text) => {
                           navigator.clipboard.writeText(text);
                           setSqlCopied(true);
                           setTimeout(() => setSqlCopied(false), 3000);
@@ -1358,128 +1553,83 @@ export default function AdminDashboard({
         <div className="modal-backdrop" onClick={() => !eventSubmitting && setEventModal(false)}>
           <div className="modal-form-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-form-header">
-              <h3>{editingEvent ? 'Edit Event' : 'Add New Event'}</h3>
+              <h3>{editingEvent ? 'Edit Event' : 'Create New Event'}</h3>
               <button
                 type="button"
                 disabled={eventSubmitting}
                 onClick={() => setEventModal(false)}
                 className="modal-close-btn"
-                aria-label="Close Modal"
               >
                 <X size={20} />
               </button>
             </div>
 
-            {/* Submission Error Panel */}
             {eventSubmitError && (
               <div className="modal-error-panel" role="alert">
                 <div className="error-panel-header">
                   <AlertTriangle size={20} />
                   <span className="error-panel-heading">{eventSubmitError.heading || 'Submission Failed'}</span>
-                  {eventSubmitError.operation && (
-                    <span className="error-panel-op-badge">{eventSubmitError.operation}</span>
-                  )}
                 </div>
-
                 <p className="error-panel-desc">{eventSubmitError.message}</p>
-
-                {(eventSubmitError.code || eventSubmitError.details || eventSubmitError.hint) && (
-                  <div className="error-panel-tech-box">
-                    <div className="error-panel-tech-meta">
-                      {eventSubmitError.code && (
-                        <span>Supabase Error Code: <strong>{eventSubmitError.code}</strong></span>
-                      )}
-                    </div>
-                    {eventSubmitError.details && <div>Details: {eventSubmitError.details}</div>}
-                    {eventSubmitError.hint && <div>Hint: {eventSubmitError.hint}</div>}
-                  </div>
-                )}
-
-                {eventSubmitError.suggestion && (
-                  <div className="error-panel-suggestion">
-                    <Info size={15} style={{ flexShrink: 0, marginTop: '2px' }} />
-                    <span>{eventSubmitError.suggestion}</span>
-                  </div>
-                )}
               </div>
             )}
 
             <form onSubmit={handleSaveEvent} className="modal-actual-form">
-              {/* Event Title */}
               <div className="form-field">
                 <label>Event Title *</label>
                 <input
                   type="text"
-                  placeholder="e.g. Westlands Afro-Urban Night"
+                  required
+                  placeholder="e.g. CLUB 47 PARTY"
                   value={eventFormData.title}
                   className={fieldErrors.title ? 'input-has-error' : ''}
                   onChange={(e) => {
                     setEventFormData({ ...eventFormData, title: e.target.value });
-                    if (fieldErrors.title) {
-                      setFieldErrors({ ...fieldErrors, title: null });
-                    }
+                    if (fieldErrors.title) setFieldErrors({ ...fieldErrors, title: null });
                   }}
                 />
-                {fieldErrors.title && (
-                  <span className="field-error-text">
-                    <AlertTriangle size={13} /> {fieldErrors.title}
-                  </span>
-                )}
               </div>
 
-              {/* Venue and City */}
               <div className="form-grid-2">
                 <div className="form-field">
-                  <label>Venue Name *</label>
+                  <label>Venue *</label>
                   <input
                     type="text"
-                    placeholder="e.g. Alchemist Bar"
+                    required
+                    placeholder="e.g. Mukurwe-ini"
                     value={eventFormData.venue}
                     className={fieldErrors.venue ? 'input-has-error' : ''}
                     onChange={(e) => {
                       setEventFormData({ ...eventFormData, venue: e.target.value });
-                      if (fieldErrors.venue) {
-                        setFieldErrors({ ...fieldErrors, venue: null });
-                      }
+                      if (fieldErrors.venue) setFieldErrors({ ...fieldErrors, venue: null });
                     }}
                   />
-                  {fieldErrors.venue && (
-                    <span className="field-error-text">
-                      <AlertTriangle size={13} /> {fieldErrors.venue}
-                    </span>
-                  )}
                 </div>
                 <div className="form-field">
                   <label>City *</label>
                   <input
                     type="text"
-                    placeholder="Nairobi"
+                    required
+                    placeholder="e.g. Nyeri"
                     value={eventFormData.city}
                     onChange={(e) => setEventFormData({ ...eventFormData, city: e.target.value })}
                   />
                 </div>
               </div>
 
-              {/* Date and Time */}
               <div className="form-grid-2">
                 <div className="form-field">
                   <label>Event Date *</label>
                   <input
                     type="date"
+                    required
                     value={eventFormData.event_date}
                     className={fieldErrors.event_date ? 'input-has-error' : ''}
                     onChange={(e) => {
                       setEventFormData({ ...eventFormData, event_date: e.target.value });
-                      if (fieldErrors.event_date) {
-                        setFieldErrors({ ...fieldErrors, event_date: null });
-                      }
+                      if (fieldErrors.event_date) setFieldErrors({ ...fieldErrors, event_date: null });
                     }}
                   />
-                  {fieldErrors.event_date && (
-                    <span className="field-error-text">
-                      <AlertTriangle size={13} /> {fieldErrors.event_date}
-                    </span>
-                  )}
                 </div>
                 <div className="form-field">
                   <label>Event Time</label>
@@ -1492,15 +1642,14 @@ export default function AdminDashboard({
                 </div>
               </div>
 
-              {/* Category and Status */}
               <div className="form-grid-2">
                 <div className="form-field">
-                  <label>Genre / Category</label>
+                  <label>Category</label>
                   <select
                     value={eventFormData.category_id || eventFormData.category || ''}
                     onChange={(e) => {
                       const selectedVal = e.target.value;
-                      const matched = categories.find(c => c.id === selectedVal || c.name === selectedVal);
+                      const matched = categories.find((c) => c.id === selectedVal || c.name === selectedVal);
                       setEventFormData({
                         ...eventFormData,
                         category_id: matched?.id || null,
@@ -1508,13 +1657,14 @@ export default function AdminDashboard({
                       });
                     }}
                   >
-                    <option value="">-- Choose Category --</option>
-                    {categories.map((c) => (
-                      <option key={c.id || c.slug} value={c.id}>{c.name}</option>
-                    ))}
                     <option value="Club Night">Club Night</option>
                     <option value="Festival">Festival</option>
                     <option value="Private Event">Private Event</option>
+                    {categories.map((c) => (
+                      <option key={c.id || c.slug} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="form-field">
@@ -1530,7 +1680,7 @@ export default function AdminDashboard({
                 </div>
               </div>
 
-              {/* Official Flyer Image Upload (Storage Bucket: event-flyers) */}
+              {/* Flyer Upload */}
               <div className="form-field">
                 <label>Official Event Flyer (Storage Upload) *</label>
                 <div className={`flyer-upload-zone ${fieldErrors.flyer ? 'zone-has-error' : ''}`}>
@@ -1543,19 +1693,12 @@ export default function AdminDashboard({
                   <div className="upload-zone-prompt">
                     <UploadCloud size={28} className="upload-icon" />
                     <span className="upload-prompt-title">
-                      {flyerFile ? 'Click to select a different image' : 'Click or drop flyer image here'}
+                      {flyerFile ? 'Click to change image' : 'Click or drop flyer image here'}
                     </span>
                     <span className="upload-prompt-sub">JPEG, PNG, or WebP up to 5 MB</span>
                   </div>
                 </div>
 
-                {fieldErrors.flyer && (
-                  <span className="field-error-text">
-                    <AlertTriangle size={13} /> {fieldErrors.flyer}
-                  </span>
-                )}
-
-                {/* Selected Image Preview */}
                 {(flyerPreview || eventFormData.flyer_url) && (
                   <div className="flyer-preview-card">
                     <img
@@ -1564,44 +1707,17 @@ export default function AdminDashboard({
                       className="flyer-preview-thumb"
                     />
                     <div className="flyer-preview-details">
-                      <div className="flyer-preview-name">
-                        {flyerFile ? flyerFile.name : (editingEvent ? 'Current Event Flyer' : 'Linked Flyer')}
-                      </div>
+                      <div className="flyer-preview-name">{flyerFile ? flyerFile.name : 'Linked Event Flyer'}</div>
                       <div className="flyer-preview-meta">
-                        {flyerFile ? `${(flyerFile.size / (1024 * 1024)).toFixed(2)} MB` : 'URL / Storage Linked'}
+                        {flyerFile ? `${(flyerFile.size / (1024 * 1024)).toFixed(2)} MB` : 'Storage Connected'}
                       </div>
                     </div>
-                    {flyerFile && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFlyerFile(null);
-                          setFlyerPreview(null);
-                        }}
-                        className="flyer-remove-btn"
-                        title="Remove selected file"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
                   </div>
                 )}
               </div>
 
-              {/* Fallback Flyer URL */}
               <div className="form-field">
-                <label>Or Flyer Public URL (Optional alternative)</label>
-                <input
-                  type="url"
-                  placeholder="https://..."
-                  value={eventFormData.flyer_url || ''}
-                  onChange={(e) => setEventFormData({ ...eventFormData, flyer_url: e.target.value })}
-                />
-              </div>
-
-              {/* Ticket URL */}
-              <div className="form-field">
-                <label>Ticket / RSVP URL (Optional)</label>
+                <label>Ticket / RSVP Link (Optional)</label>
                 <input
                   type="url"
                   placeholder="https://..."
@@ -1610,33 +1726,19 @@ export default function AdminDashboard({
                 />
               </div>
 
-              {/* Description */}
               <div className="form-field">
-                <label>Description & Lineup (Optional)</label>
+                <label>Description (Optional)</label>
                 <textarea
                   rows="3"
-                  placeholder="Event details, dress code, supporting DJs..."
+                  placeholder="Special guest appearances, dress code, VIP details..."
                   value={eventFormData.description || ''}
                   onChange={(e) => setEventFormData({ ...eventFormData, description: e.target.value })}
                 ></textarea>
               </div>
 
-              {/* Modal Actions */}
               <div className="modal-form-actions">
-                <button
-                  type="submit"
-                  disabled={eventSubmitting}
-                  className="btn btn-primary"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
-                >
-                  {eventSubmitting ? (
-                    <>
-                      <RefreshCw size={15} style={{ animation: 'spin 1s linear infinite' }} />
-                      <span>Saving Event...</span>
-                    </>
-                  ) : (
-                    <span>{editingEvent ? 'Save Changes' : 'Create Event'}</span>
-                  )}
+                <button type="submit" disabled={eventSubmitting} className="btn btn-primary">
+                  <span>{eventSubmitting ? 'Saving Event...' : editingEvent ? 'Update Event' : 'Publish Event'}</span>
                 </button>
                 <button
                   type="button"
@@ -1652,33 +1754,41 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* MIX MODAL */}
+      {/* MIX MODAL (YOUTUBE EXTERNAL ONLY) */}
       {mixModal && (
-        <div className="modal-backdrop" onClick={() => setMixModal(false)}>
+        <div className="modal-backdrop" onClick={() => !mixSubmitting && setMixModal(false)}>
           <div className="modal-form-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-form-header">
-              <h3>Add Real Mix</h3>
+              <h3>{editingMix ? 'Edit YouTube Mix' : 'Add YouTube Mix'}</h3>
               <button onClick={() => setMixModal(false)} className="modal-close-btn">
                 <X size={20} />
               </button>
             </div>
+
+            {mixSubmitError && (
+              <div className="modal-error-panel" role="alert">
+                <p className="error-panel-desc">{mixSubmitError}</p>
+              </div>
+            )}
+
             <form onSubmit={handleSaveMix} className="modal-actual-form">
               <div className="form-field">
                 <label>Mix Title *</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Live at Westlands"
+                  placeholder="e.g. BEST OF SALIM JUNIOR"
                   value={mixFormData.title}
                   onChange={(e) => setMixFormData({ ...mixFormData, title: e.target.value })}
                 />
               </div>
+
               <div className="form-grid-2">
                 <div className="form-field">
                   <label>Genre / Style</label>
                   <input
                     type="text"
-                    placeholder="Afrobeats & Amapiano"
+                    placeholder="e.g. MUGITHI, AFROBEATS"
                     value={mixFormData.genre}
                     onChange={(e) => setMixFormData({ ...mixFormData, genre: e.target.value })}
                   />
@@ -1687,151 +1797,42 @@ export default function AdminDashboard({
                   <label>Duration</label>
                   <input
                     type="text"
-                    placeholder="e.g. 45:00"
+                    placeholder="e.g. 55:21"
                     value={mixFormData.duration}
                     onChange={(e) => setMixFormData({ ...mixFormData, duration: e.target.value })}
                   />
                 </div>
               </div>
+
               <div className="form-field">
-                <label>Direct Audio MP3 URL (Optional)</label>
+                <label>External YouTube URL *</label>
                 <input
                   type="url"
-                  placeholder="https://..."
-                  value={mixFormData.audio_url}
-                  onChange={(e) => setMixFormData({ ...mixFormData, audio_url: e.target.value })}
+                  required
+                  placeholder="https://youtu.be/... or https://www.youtube.com/watch?v=..."
+                  value={mixFormData.youtube_url}
+                  onChange={(e) => setMixFormData({ ...mixFormData, youtube_url: e.target.value })}
                 />
+                <span style={{ fontSize: '0.75rem', color: '#a1a1aa', marginTop: '4px', display: 'block' }}>
+                  Visitors will listen on YouTube directly. Artwork thumbnail will auto-generate from YouTube if left blank.
+                </span>
               </div>
+
               <div className="form-field">
-                <label>SoundCloud / Streaming URL (Optional)</label>
+                <label>Custom Artwork URL (Optional)</label>
                 <input
                   type="url"
-                  placeholder="https://soundcloud.com/..."
-                  value={mixFormData.stream_url}
-                  onChange={(e) => setMixFormData({ ...mixFormData, stream_url: e.target.value })}
-                />
-              </div>
-              <div className="form-field">
-                <label>Artwork Image URL (Optional)</label>
-                <input
-                  type="url"
-                  placeholder="https://..."
+                  placeholder="Leave blank to use YouTube thumbnail automatically"
                   value={mixFormData.artwork_url}
                   onChange={(e) => setMixFormData({ ...mixFormData, artwork_url: e.target.value })}
                 />
               </div>
-              <div className="form-field">
-                <label>Tracklist (Optional)</label>
-                <textarea
-                  rows="3"
-                  placeholder="Track sequence"
-                  value={mixFormData.tracklist}
-                  onChange={(e) => setMixFormData({ ...mixFormData, tracklist: e.target.value })}
-                ></textarea>
-              </div>
+
               <div className="modal-form-actions">
-                <button type="submit" className="btn btn-primary">
-                  <span>Save Mix</span>
+                <button type="submit" disabled={mixSubmitting} className="btn btn-primary">
+                  <span>{mixSubmitting ? 'Saving Mix...' : editingMix ? 'Update Mix' : 'Publish Mix'}</span>
                 </button>
                 <button type="button" onClick={() => setMixModal(false)} className="btn btn-secondary">
-                  <span>Cancel</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* CATEGORY MODAL */}
-      {catModal && (
-        <div className="modal-backdrop" onClick={() => setCatModal(false)}>
-          <div className="modal-form-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-form-header">
-              <h3>Add Sound Category</h3>
-              <button onClick={() => setCatModal(false)} className="modal-close-btn">
-                <X size={20} />
-              </button>
-            </div>
-            <form onSubmit={handleSaveCategory} className="modal-actual-form">
-              <div className="form-field">
-                <label>Category Name *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Afrobeats"
-                  value={catFormData.name}
-                  onChange={(e) => setCatFormData({ ...catFormData, name: e.target.value })}
-                />
-              </div>
-              <div className="form-field">
-                <label>Description</label>
-                <input
-                  type="text"
-                  placeholder="Brief description of the sound"
-                  value={catFormData.description}
-                  onChange={(e) => setCatFormData({ ...catFormData, description: e.target.value })}
-                />
-              </div>
-              <div className="modal-form-actions">
-                <button type="submit" className="btn btn-primary">
-                  <span>Add Category</span>
-                </button>
-                <button type="button" onClick={() => setCatModal(false)} className="btn btn-secondary">
-                  <span>Cancel</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* SOCIAL MODAL */}
-      {socialModal && (
-        <div className="modal-backdrop" onClick={() => setSocialModal(false)}>
-          <div className="modal-form-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-form-header">
-              <h3>Add Social Profile</h3>
-              <button onClick={() => setSocialModal(false)} className="modal-close-btn">
-                <X size={20} />
-              </button>
-            </div>
-            <form onSubmit={handleSaveSocial} className="modal-actual-form">
-              <div className="form-field">
-                <label>Platform *</label>
-                <select
-                  value={socialFormData.platform}
-                  onChange={(e) => setSocialFormData({ ...socialFormData, platform: e.target.value })}
-                >
-                  <option value="instagram">Instagram</option>
-                  <option value="tiktok">TikTok</option>
-                  <option value="youtube">YouTube</option>
-                  <option value="soundcloud">SoundCloud</option>
-                </select>
-              </div>
-              <div className="form-field">
-                <label>Profile URL *</label>
-                <input
-                  type="url"
-                  required
-                  placeholder="https://..."
-                  value={socialFormData.url}
-                  onChange={(e) => setSocialFormData({ ...socialFormData, url: e.target.value })}
-                />
-              </div>
-              <div className="form-field">
-                <label>Handle / Username (Optional)</label>
-                <input
-                  type="text"
-                  placeholder="@handle"
-                  value={socialFormData.handle}
-                  onChange={(e) => setSocialFormData({ ...socialFormData, handle: e.target.value })}
-                />
-              </div>
-              <div className="modal-form-actions">
-                <button type="submit" className="btn btn-primary">
-                  <span>Save Channel</span>
-                </button>
-                <button type="button" onClick={() => setSocialModal(false)} className="btn btn-secondary">
                   <span>Cancel</span>
                 </button>
               </div>

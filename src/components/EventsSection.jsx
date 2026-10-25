@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
-import { Calendar, MapPin, Clock, Ticket, Image as ImageIcon, X, Send } from 'lucide-react';
+import { Calendar, MapPin, Clock, Ticket, Send } from 'lucide-react';
 
 export default function EventsSection({ events = [], onBookClick }) {
   const [filter, setFilter] = useState('upcoming');
-  const [selectedFlyer, setSelectedFlyer] = useState(null);
 
-  const upcomingEvents = events.filter(e => e.status === 'upcoming');
-  const pastEvents = events.filter(e => e.status === 'past');
+  const upcomingEvents = events.filter((e) => e.status === 'upcoming');
+  const pastEvents = events.filter((e) => e.status === 'past');
 
   const filteredEvents = events.filter((evt) => {
     if (filter === 'all') return true;
@@ -15,12 +14,14 @@ export default function EventsSection({ events = [], onBookClick }) {
     return true;
   });
 
-  const formatDate = (dateStr) => {
+  const formatDateNairobi = (dateStr) => {
     try {
-      const date = new Date(dateStr);
-      const day = date.getDate().toString().padStart(2, '0');
-      const month = date.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-      const year = date.getFullYear();
+      if (!dateStr) return { day: '--', month: 'TBD', year: '' };
+      const normalizedStr = dateStr.includes('T') ? dateStr : `${dateStr}T00:00:00+03:00`;
+      const date = new Date(normalizedStr);
+      const day = date.toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit' });
+      const month = date.toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi', month: 'short' }).toUpperCase();
+      const year = date.toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi', year: 'numeric' });
       return { day, month, year };
     } catch {
       return { day: '--', month: 'TBD', year: '' };
@@ -35,11 +36,10 @@ export default function EventsSection({ events = [], onBookClick }) {
             <span className="section-tag">Performances & Tour</span>
             <h2 className="section-title">EVENTS & TOUR DATES</h2>
             <p className="section-subtitle">
-              Public club dates, festivals, and live appearances by DJ Samizen.
+              Public club appearances, festival lineups, and live sets by Dj Samizen.
             </p>
           </div>
 
-          {/* Filter Pills (only show if events exist) */}
           {events.length > 0 && (
             <div className="events-filter-bar">
               <button
@@ -66,15 +66,14 @@ export default function EventsSection({ events = [], onBookClick }) {
           )}
         </div>
 
-        {/* Events Grid or Clean Empty State */}
         {filteredEvents.length === 0 ? (
           <div className="empty-state-card">
             <div className="empty-icon-hub">
               <Calendar size={32} />
             </div>
-            <h3 className="empty-title">No upcoming events at the moment. Check back soon.</h3>
+            <h3 className="empty-title">No upcoming events scheduled right now.</h3>
             <p className="empty-sub">
-              Dates are updated as club residencies and festival appearances are confirmed. Planning a private event or festival?
+              Tour dates are published as venue residencies and festival dates are confirmed. Planning a club night or private event?
             </p>
             <button
               onClick={() => onBookClick()}
@@ -88,103 +87,93 @@ export default function EventsSection({ events = [], onBookClick }) {
         ) : (
           <div className="events-grid">
             {filteredEvents.map((evt) => {
-              const { day, month, year } = formatDate(evt.event_date);
+              const { day, month, year } = formatDateNairobi(evt.event_date);
               const isPast = evt.status === 'past';
+              const flyerSrc = evt.flyer_url || '/images/dj-samizen.png';
 
               return (
-                <div key={evt.id} className={`event-card ${isPast ? 'event-past' : ''}`}>
-                  <div className="event-date-block">
-                    <span className="event-month">{month}</span>
-                    <span className="event-day">{day}</span>
-                    <span className="event-year">{year}</span>
-                  </div>
-
-                  <div className="event-details">
-                    <div className="event-tags-row">
-                      {evt.category && <span className="badge badge-tag">{evt.category}</span>}
-                      {evt.status === 'upcoming' && <span className="badge badge-live">CONFIRMED</span>}
-                      {evt.status === 'sold_out' && <span className="badge badge-tag" style={{ color: '#ff4444' }}>SOLD OUT</span>}
+                <div key={evt.id} className={`event-card-v2 ${isPast ? 'event-past' : ''}`}>
+                  {/* Immediate 4:5 Aspect Ratio Flyer Image */}
+                  <div className="event-card-flyer-wrap">
+                    <img
+                      src={flyerSrc}
+                      alt={`${evt.title} Official Flyer`}
+                      className="event-card-flyer-img"
+                      loading="lazy"
+                      onError={(e) => {
+                        e.currentTarget.src = '/images/dj-samizen.png';
+                      }}
+                    />
+                    <div className="event-flyer-badges">
+                      <span className="event-date-chip">
+                        {month} {day}
+                      </span>
+                      {evt.status === 'upcoming' && <span className="badge badge-live">LIVE</span>}
+                      {evt.status === 'sold_out' && (
+                        <span className="badge badge-tag" style={{ color: '#ff4444', borderColor: '#ff4444' }}>
+                          SOLD OUT
+                        </span>
+                      )}
                       {isPast && <span className="badge badge-tag">PAST</span>}
                     </div>
+                  </div>
 
-                    <h3 className="event-name">{evt.title}</h3>
+                  {/* Event Details Content */}
+                  <div className="event-card-body">
+                    <div className="event-card-meta-top">
+                      {evt.category && <span className="event-category-label">{evt.category}</span>}
+                      <span className="event-year-label">{year}</span>
+                    </div>
 
-                    <div className="event-meta-info">
-                      <div className="meta-item">
-                        <MapPin size={15} className="meta-icon" />
-                        <span><strong>{evt.venue}</strong> {evt.city ? `— ${evt.city}` : ''}</span>
+                    <h3 className="event-card-title" title={evt.title}>
+                      {evt.title}
+                    </h3>
+
+                    <div className="event-card-info-list">
+                      <div className="event-info-row" title={`${evt.venue} — ${evt.city || 'Nairobi'}`}>
+                        <MapPin size={13} className="info-icon" />
+                        <span>
+                          <strong>{evt.venue}</strong>
+                          {evt.city ? ` • ${evt.city}` : ''}
+                        </span>
                       </div>
+
                       {evt.event_time && (
-                        <div className="meta-item">
-                          <Clock size={15} className="meta-icon" />
+                        <div className="event-info-row">
+                          <Clock size={13} className="info-icon" />
                           <span>{evt.event_time}</span>
                         </div>
                       )}
                     </div>
 
-                    {evt.description && <p className="event-desc">{evt.description}</p>}
-                  </div>
-
-                  <div className="event-actions">
-                    {evt.ticket_url && !isPast && (
-                      <a
-                        href={evt.ticket_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn btn-primary btn-sm"
-                      >
-                        <Ticket size={15} />
-                        <span>Tickets / RSVP</span>
-                      </a>
-                    )}
-
-                    {!isPast && (
-                      <button
-                        onClick={() => onBookClick(evt.title)}
-                        className="btn btn-secondary btn-sm"
-                      >
-                        <span>VIP / Booking</span>
-                      </button>
-                    )}
-
-                    {evt.flyer_url && (
-                      <button
-                        onClick={() => setSelectedFlyer(evt)}
-                        className="btn btn-outline btn-sm"
-                        title="View Official Flyer"
-                      >
-                        <ImageIcon size={15} />
-                        <span>Flyer</span>
-                      </button>
-                    )}
+                    {/* Actions */}
+                    <div className="event-card-footer">
+                      {evt.ticket_url && !isPast ? (
+                        <a
+                          href={evt.ticket_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn btn-primary btn-sm btn-card-action"
+                        >
+                          <Ticket size={14} />
+                          <span>Tickets</span>
+                        </a>
+                      ) : !isPast ? (
+                        <button
+                          onClick={() => onBookClick(evt.title)}
+                          className="btn btn-primary btn-sm btn-card-action"
+                        >
+                          <Send size={13} />
+                          <span>Book VIP</span>
+                        </button>
+                      ) : (
+                        <span className="event-completed-tag">Concluded</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
             })}
-          </div>
-        )}
-
-        {/* Modal for viewing real flyer if present */}
-        {selectedFlyer && (
-          <div className="modal-backdrop" onClick={() => setSelectedFlyer(null)}>
-            <div className="modal-flyer-content" onClick={(e) => e.stopPropagation()}>
-              <button 
-                onClick={() => setSelectedFlyer(null)} 
-                className="modal-close-btn"
-                aria-label="Close Flyer Modal"
-              >
-                <X size={22} />
-              </button>
-              <img
-                src={selectedFlyer.flyer_url}
-                alt={`${selectedFlyer.title} Flyer`}
-                className="modal-flyer-img"
-              />
-              <div className="modal-flyer-caption">
-                <h4>{selectedFlyer.title}</h4>
-                <p>{selectedFlyer.venue} {selectedFlyer.city ? `• ${selectedFlyer.city}` : ''}</p>
-              </div>
-            </div>
           </div>
         )}
       </div>

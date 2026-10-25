@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-import { Sliders, CheckCircle2, FileText, ChevronRight, Headphones } from 'lucide-react';
+import { Sliders, CheckCircle2, FileText, ChevronRight } from 'lucide-react';
 
 export default function AboutPressKit({ profile, onBookClick }) {
   const [activeTab, setActiveTab] = useState('bio');
@@ -14,7 +13,7 @@ export default function AboutPressKit({ profile, onBookClick }) {
             <div className="about-image-card">
               <img
                 src={portraitImg}
-                alt={profile.dj_name || 'DJ Samizen'}
+                alt={profile.dj_name || 'Dj Samizen'}
                 className="about-portrait"
               />
             </div>
