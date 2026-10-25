@@ -1,3 +1,4 @@
+import React, { useState } from 'react';
 import { Sliders, CheckCircle2, FileText, ChevronRight } from 'lucide-react';
 
 export default function AboutPressKit({ profile, onBookClick }) {
