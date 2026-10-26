@@ -8,6 +8,7 @@ import AboutPressKit from './components/AboutPressKit';
 import BookingSection from './components/BookingSection';
 import Footer from './components/Footer';
 import AdminDashboard from './components/AdminDashboard';
+import ResetPassword from './components/ResetPassword';
 
 import {
   getProfile,
@@ -27,6 +28,11 @@ import {
 } from './lib/initialData';
 
 export default function App() {
+  // Detect Supabase password-reset landing page
+  const [isResetPasswordRoute] = useState(() => {
+    return window.location.pathname === '/reset-password';
+  });
+
   const [profile, setProfile] = useState(INITIAL_PROFILE);
   const [events, setEvents] = useState(INITIAL_EVENTS);
   const [categories, setCategories] = useState(INITIAL_CATEGORIES);
@@ -93,6 +99,20 @@ export default function App() {
     setPrefilledEvent(eventName);
     scrollToSection('booking');
   };
+
+  // Password-reset route — render only the reset page, no nav/footer
+  if (isResetPasswordRoute) {
+    const handleBackToLogin = () => {
+      // Navigate to root, clear the recovery URL params, and open admin portal
+      window.history.replaceState({}, '', '/');
+      setIsAdminOpen(true);
+    };
+    return (
+      <div className="app-root" data-theme={theme}>
+        <ResetPassword onBackToLogin={handleBackToLogin} />
+      </div>
+    );
+  }
 
   return (
     <div className="app-root">

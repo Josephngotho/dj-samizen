@@ -3387,3 +3387,237 @@
   align-items: center;
 }
 
+/* ========== RESET PASSWORD PAGE ========== */
+.reset-password-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary, #080810);
+  padding: 2rem 1rem;
+  font-family: 'Outfit', sans-serif;
+}
+
+.reset-password-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-card, #12121e);
+  border: 1px solid var(--border-subtle, #232330);
+  border-radius: 20px;
+  padding: 2.5rem 2rem;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.55);
+}
+
+.reset-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 2rem;
+}
+
+.reset-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--accent-orange, #ff5500);
+}
+
+.reset-brand-name {
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  color: var(--accent-orange, #ff5500);
+  margin: 0;
+}
+
+/* Loading */
+.reset-status-block {
+  text-align: center;
+  padding: 1.5rem 0;
+}
+
+.reset-spinner {
+  width: 44px;
+  height: 44px;
+  border: 3px solid rgba(255,85,0,0.2);
+  border-top-color: var(--accent-orange, #ff5500);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  margin: 0 auto 1rem;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.reset-status-text {
+  color: var(--text-muted, #a1a1aa);
+  font-size: 0.9rem;
+}
+
+/* Header */
+.reset-header {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.reset-icon {
+  color: var(--accent-orange, #ff5500);
+  margin-bottom: 0.5rem;
+}
+
+.reset-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+  margin: 0 0 0.4rem;
+}
+
+.reset-sub {
+  font-size: 0.85rem;
+  color: var(--text-muted, #a1a1aa);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Form */
+.reset-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.reset-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.reset-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted, #a1a1aa);
+}
+
+.reset-input {
+  width: 100%;
+  padding: 0.78rem 1rem;
+  background: var(--bg-primary, #0e0e14);
+  border: 1px solid var(--border-subtle, #232330);
+  border-radius: 8px;
+  color: var(--text-primary, #fff);
+  font-size: 0.9rem;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+}
+
+.reset-input:focus {
+  outline: none;
+  border-color: var(--accent-orange, #ff5500);
+}
+
+.password-input-wrap .reset-input {
+  padding-right: 2.75rem !important;
+}
+
+/* Hint text */
+.reset-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted, #a1a1aa);
+  margin: 0;
+}
+
+.reset-hint-error {
+  color: #ef4444;
+}
+
+.reset-hint-ok {
+  color: #10b981;
+}
+
+/* Error banner */
+.reset-error {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #ef4444;
+  font-size: 0.82rem;
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.25);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+}
+
+/* Submit button loading */
+.reset-submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.spin-icon {
+  animation: spin 0.75s linear infinite;
+  flex-shrink: 0;
+}
+
+/* Success */
+.reset-success-block {
+  text-align: center;
+  padding: 0.5rem 0;
+}
+
+.reset-success-icon {
+  color: #10b981;
+  margin-bottom: 0.75rem;
+}
+
+/* Expired */
+.reset-expired-block {
+  text-align: center;
+}
+
+.reset-expired-icon {
+  color: #f59e0b;
+  margin-bottom: 0.75rem;
+}
+
+.reset-resend-section {
+  margin-top: 1.5rem;
+  text-align: left;
+}
+
+.reset-resend-label {
+  font-size: 0.82rem;
+  color: var(--text-muted, #a1a1aa);
+  margin-bottom: 0.5rem;
+}
+
+.reset-resend-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.reset-resend-msg {
+  font-size: 0.82rem;
+  margin: 0.5rem 0 0;
+}
+
+.reset-resend-msg.success {
+  color: #10b981;
+}
+
+.reset-resend-msg.error {
+  color: #ef4444;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .reset-password-card {
+    padding: 2rem 1.25rem;
+    border-radius: 14px;
+  }
+}

@@ -118,8 +118,11 @@ export async function signInAdminWithPassword(email, password) {
 
 export async function requestPasswordReset(email) {
   try {
+    // Use VITE_APP_URL if set (e.g. Netlify production), otherwise fall back to current origin.
+    // Do NOT use a hash (#reset-password) – Supabase requires a real path.
+    const appUrl = import.meta.env.VITE_APP_URL || window.location.origin;
     const { data, error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${window.location.origin}/#reset-password`
+      redirectTo: `${appUrl}/reset-password`
     });
     if (error) {
       reportSupabaseError('Password reset request', error);
